@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
-import { Settings, X, Eye, EyeOff, Sparkles } from "lucide-react";
+import { Settings, X, Eye, EyeOff, Sparkles, ChevronDown } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { UserPreferences } from "@/types/bug";
+import { AI_PROVIDERS, getProviderConfig, getActiveApiKey } from "@/utils/aiProviders";
+import type { AIProvider, UserPreferences } from "@/types/bug";
 
 interface SettingsModalProps {
   open: boolean;
@@ -14,25 +15,43 @@ interface SettingsModalProps {
 
 export function SettingsModal({ open, onClose, preferences, onSave }: SettingsModalProps) {
   const [aiEnabled, setAiEnabled] = useState(preferences.aiEnabled);
-  const [apiKey, setApiKey] = useState(preferences.groqApiKey || "");
+  const [provider, setProvider] = useState<AIProvider>(preferences.aiProvider || "groq");
+  const [model, setModel] = useState(preferences.aiModel || "");
+  const [apiKeys, setApiKeys] = useState<Partial<Record<AIProvider, string>>>(preferences.apiKeys || {});
   const [showKey, setShowKey] = useState(false);
 
   useEffect(() => {
     setAiEnabled(preferences.aiEnabled);
-    setApiKey(preferences.groqApiKey || "");
+    setProvider(preferences.aiProvider || "groq");
+    setModel(preferences.aiModel || "");
+    const keys = { ...(preferences.apiKeys || {}) };
+    // Backward compat
+    if (preferences.groqApiKey && !keys.groq) keys.groq = preferences.groqApiKey;
+    setApiKeys(keys);
   }, [preferences, open]);
 
   if (!open) return null;
 
+  const config = getProviderConfig(provider);
+  const currentKey = apiKeys[provider] || "";
+
   const handleSave = () => {
-    onSave({ ...preferences, aiEnabled, groqApiKey: apiKey || undefined });
+    const activeModel = model || config.models[0].id;
+    onSave({
+      ...preferences,
+      aiEnabled,
+      aiProvider: provider,
+      aiModel: activeModel,
+      apiKeys,
+      groqApiKey: apiKeys.groq,
+    });
     onClose();
   };
 
   return (
     <>
       <div className="fixed inset-0 z-50 bg-background/70 backdrop-blur-sm" onClick={onClose} />
-      <div className="fixed inset-x-4 top-[10%] z-50 mx-auto max-w-md rounded-lg border bg-card shadow-2xl animate-fade-in">
+      <div className="fixed inset-x-4 top-[5%] z-50 mx-auto max-w-md rounded-lg border bg-card shadow-2xl animate-fade-in max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between border-b px-5 py-4">
           <div className="flex items-center gap-2">
             <Settings className="h-4 w-4 text-muted-foreground" />
@@ -51,59 +70,116 @@ export function SettingsModal({ open, onClose, preferences, onSave }: SettingsMo
                 <Sparkles className="h-4 w-4 text-primary" />
               </div>
               <div>
-                <Label className="text-sm font-medium text-foreground">AI Template Detection</Label>
+                <Label className="text-sm font-medium text-foreground">AI Features</Label>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Uses Groq (Llama 3.3) for smart column mapping & insights
+                  Column mapping, insights & Q&A
                 </p>
               </div>
             </div>
             <Switch checked={aiEnabled} onCheckedChange={setAiEnabled} />
           </div>
 
-          {/* Groq API Key */}
           {aiEnabled && (
-            <div className="space-y-2 animate-fade-in">
-              <Label className="text-sm font-medium text-foreground">Groq API Key</Label>
-              <div className="relative">
-                <Input
-                  type={showKey ? "text" : "password"}
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="gsk_..."
-                  className="pr-10 font-mono text-xs"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowKey(!showKey)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
+            <div className="space-y-4 animate-fade-in">
+              {/* Provider Selection */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium text-foreground">AI Provider</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  {AI_PROVIDERS.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => {
+                        setProvider(p.id);
+                        setModel("");
+                        setShowKey(false);
+                      }}
+                      className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-left text-sm transition-all ${
+                        provider === p.id
+                          ? "border-primary bg-primary/5 text-foreground ring-1 ring-primary/30"
+                          : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+                      }`}
+                    >
+                      <span className="font-medium">{p.name}</span>
+                      {apiKeys[p.id] && (
+                        <span className="ml-auto h-2 w-2 rounded-full bg-chart-low" />
+                      )}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Get your free key at{" "}
-                <a
-                  href="https://console.groq.com/keys"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary underline"
-                >
-                  console.groq.com
-                </a>
-                . Stored only in your browser.
-              </p>
 
-              {apiKey && (
+              {/* Model Selection */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium text-foreground">Model</Label>
+                <div className="relative">
+                  <select
+                    value={model || config.models[0].id}
+                    onChange={(e) => setModel(e.target.value)}
+                    className="h-10 w-full appearance-none rounded-md border bg-background px-3 pr-8 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  >
+                    {config.models.map((m) => (
+                      <option key={m.id} value={m.id}>{m.name}</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-2.5 top-3 h-4 w-4 text-muted-foreground pointer-events-none" />
+                </div>
+              </div>
+
+              {/* API Key */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium text-foreground">{config.name} API Key</Label>
+                <div className="relative">
+                  <Input
+                    type={showKey ? "text" : "password"}
+                    value={currentKey}
+                    onChange={(e) => setApiKeys({ ...apiKeys, [provider]: e.target.value })}
+                    placeholder={`${config.keyPrefix}...`}
+                    className="pr-10 font-mono text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowKey(!showKey)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Get your key at{" "}
+                  <a href={config.keyUrl} target="_blank" rel="noopener noreferrer" className="text-primary underline">
+                    {config.keyUrl.replace("https://", "").split("/")[0]}
+                  </a>
+                  . Stored only in your browser.
+                </p>
+              </div>
+
+              {/* Status */}
+              {currentKey && (
                 <div className="rounded-md border border-chart-low/30 bg-chart-low/5 px-3 py-2">
                   <p className="text-xs text-foreground">
-                    ✓ Key configured. AI features active:
+                    ✓ {config.name} key configured. AI features active:
                   </p>
                   <ul className="mt-1 text-xs text-muted-foreground list-disc list-inside space-y-0.5">
                     <li>Smart column mapping when auto-detection fails</li>
                     <li>Bug data insights & trend analysis</li>
-                    <li>Severity distribution analysis</li>
+                    <li>RAG-powered Q&A over your full dataset</li>
                     <li>Actionable recommendations</li>
                   </ul>
+                </div>
+              )}
+
+              {/* Configured keys summary */}
+              {Object.entries(apiKeys).filter(([, v]) => v).length > 1 && (
+                <div className="rounded-md border bg-muted/30 px-3 py-2">
+                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Configured Providers</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {AI_PROVIDERS.filter((p) => apiKeys[p.id]).map((p) => (
+                      <span key={p.id} className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+                        <span className="h-1.5 w-1.5 rounded-full bg-chart-low" />
+                        {p.name}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
