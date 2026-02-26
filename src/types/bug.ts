@@ -45,8 +45,24 @@ export type TemplateFingerprint = {
   createdAt: number;
 };
 
+// Multi-provider AI support
+export type AIProvider = "groq" | "openai" | "google" | "anthropic";
+
+export type AIProviderConfig = {
+  id: AIProvider;
+  name: string;
+  baseUrl: string;
+  models: { id: string; name: string; maxTokens: number }[];
+  keyPrefix: string;
+  keyUrl: string;
+};
+
 export type UserPreferences = {
   theme: "light" | "dark";
   aiEnabled: boolean;
   groqApiKey?: string;
+  // Multi-provider
+  aiProvider?: AIProvider;
+  aiModel?: string;
+  apiKeys?: Partial<Record<AIProvider, string>>;
 };
