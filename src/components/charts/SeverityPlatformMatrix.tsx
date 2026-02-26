@@ -7,10 +7,13 @@ interface Props {
 }
 
 const SEV_COLORS: Record<string, string> = {
-  Critical: "hsl(var(--chart-critical))",
-  High: "hsl(var(--chart-high))",
-  Medium: "hsl(var(--chart-medium))",
-  Low: "hsl(var(--chart-low))",
+  Critical: "hsl(0, 88%, 48%)",
+  High: "hsl(25, 95%, 53%)",
+  Medium: "hsl(45, 93%, 47%)",
+  Low: "hsl(142, 71%, 45%)",
+  Blocker: "hsl(18, 95%, 45%)",
+  Major: "hsl(38, 95%, 50%)",
+  Minor: "hsl(120, 70%, 44%)",
 };
 
 export function SeverityPlatformMatrix({ bugs }: Props) {
@@ -31,7 +34,9 @@ export function SeverityPlatformMatrix({ bugs }: Props) {
       return entry;
     });
 
-    return { data: chartData, severities: Array.from(sevSet).sort() };
+    const SEV_ORDER = ["Critical", "High", "Medium", "Low", "Blocker", "Major", "Minor"];
+    const sortedSeverities = SEV_ORDER.filter((s) => sevSet.has(s));
+    return { data: chartData, severities: sortedSeverities.length > 0 ? sortedSeverities : Array.from(sevSet).sort() };
   }, [bugs]);
 
   if (data.length === 0) return null;
