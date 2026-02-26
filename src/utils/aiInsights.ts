@@ -1,41 +1,23 @@
-import type { Aggregations, BugRow } from "@/types/bug";
-
-const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-const MODEL = "llama-3.3-70b-versatile";
-
-export type InsightResult = {
-  summary: string;
-  trends: string[];
-  recommendations: string[];
-  riskAreas: string[];
-  qualityScore: number;
-};
+import type { Aggregations, BugRow, AIProvider } from "@/types/bug";
+import { callAI } from "./aiProviders";
 
 /**
  * Generates AI insights from AGGREGATED data only — never sends raw rows.
- * Sends: counts, distributions, top items. Optimized for minimal tokens.
  */
 export async function generateInsights(
   apiKey: string,
+  provider: AIProvider,
+  model: string,
   agg: Aggregations,
   bugs: BugRow[]
 ): Promise<string | null> {
-  // Build a compact statistical summary — no raw data
-  const topCategories = Object.entries(agg.categoryCounts)
-    .sort(([, a], [, b]) => b - a)
-    .slice(0, 8);
-  const topComponents = Object.entries(agg.componentCounts)
-    .sort(([, a], [, b]) => b - a)
-    .slice(0, 8);
-  const severityDist = Object.entries(agg.severityCounts)
-    .sort(([, a], [, b]) => b - a);
-  const platformDist = Object.entries(agg.platformCounts)
-    .sort(([, a], [, b]) => b - a)
-    .slice(0, 5);
-  const reproDist = Object.entries(agg.reproducibilityCounts)
-    .sort(([, a], [, b]) => b - a);
+  const topCategories = Object.entries(agg.categoryCounts).sort(([, a], [, b]) => b - a).slice(0, 8);
+  const topComponents = Object.entries(agg.componentCounts).sort(([, a], [, b]) => b - a).slice(0, 8);
+  const severityDist = Object.entries(agg.severityCounts).sort(([, a], [, b]) => b - a);
+  const platformDist = Object.entries(agg.platformCounts).sort(([, a], [, b]) => b - a).slice(0, 5);
+  const reproDist = Object.entries(agg.reproducibilityCounts).sort(([, a], [, b]) => b - a);
 
-  // Compute cross-analysis: severity per component (top 5 components)
+  // Cross-analysis: severity per component (top 5)
   const componentSeverity: Record<string, Record<string, number>> = {};
   for (const comp of topComponents.slice(0, 5).map(([c]) => c)) {
     componentSeverity[comp] = {};
@@ -50,124 +32,83 @@ export async function generateInsights(
   const prompt = `You are a QA analytics expert. Analyze this bug report data and provide actionable insights for a client presentation.
 
 DATA SUMMARY (${agg.total} total bugs):
-
-Severity Distribution: ${severityDist.map(([k, v]) => `${k}: ${v}`).join(", ")}
-
+Severity: ${severityDist.map(([k, v]) => `${k}: ${v}`).join(", ")}
 Top Categories: ${topCategories.map(([k, v]) => `${k}: ${v}`).join(", ")}
-
 Top Components: ${topComponents.map(([k, v]) => `${k}: ${v}`).join(", ")}
-
-Platform Distribution: ${platformDist.map(([k, v]) => `${k}: ${v}`).join(", ")}
-
+Platforms: ${platformDist.map(([k, v]) => `${k}: ${v}`).join(", ")}
 Reproducibility: ${reproDist.map(([k, v]) => `${k}: ${v}`).join(", ")}
+Severity by Component:
+${Object.entries(componentSeverity).map(([comp, sevs]) => `  ${comp}: ${Object.entries(sevs).map(([s, c]) => `${s}(${c})`).join(", ")}`).join("\n")}
 
-Severity by Top Components:
-${Object.entries(componentSeverity)
-  .map(([comp, sevs]) => `  ${comp}: ${Object.entries(sevs).map(([s, c]) => `${s}(${c})`).join(", ")}`)
-  .join("\n")}
-
-Provide a comprehensive analysis in markdown format with these sections:
+Provide analysis in markdown:
 ## 📊 Executive Summary
-Brief overview of the bug landscape (2-3 sentences)
-
 ## 🔥 Critical Risk Areas
-Top risk areas requiring immediate attention
-
 ## 📈 Trend Analysis
-Key patterns and distributions worth noting
-
 ## 🎯 Recommendations
-Specific, actionable recommendations for the development team (prioritized)
+## 📋 Quality Score (1-10)
+Be concise, data-driven, professional. Use actual numbers.`;
 
-## 📋 Quality Score
-Rate overall quality 1-10 with brief justification
-
-Keep it concise, data-driven, and professional. Use the actual numbers.`;
-
-  try {
-    const res = await fetch(GROQ_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.3,
-        max_tokens: 1200,
-      }),
-    });
-
-    if (!res.ok) {
-      const err = await res.text();
-      console.error("Groq API error:", res.status, err);
-      return null;
-    }
-
-    const data = await res.json();
-    return data.choices?.[0]?.message?.content || null;
-  } catch (e) {
-    console.error("AI insights failed:", e);
-    return null;
-  }
+  return callAI(apiKey, provider, model, [{ role: "user", content: prompt }], { maxTokens: 1200 });
 }
 
 /**
- * AI-powered Q&A about bug data. Sends only aggregated stats + question.
+ * RAG-like Q&A: Hybrid approach
+ * - Always sends aggregated stats
+ * - Smart-filters relevant rows based on question keywords
+ * - Limits to max 30 rows to optimize tokens
  */
 export async function askAboutBugs(
   apiKey: string,
+  provider: AIProvider,
+  model: string,
   question: string,
   agg: Aggregations,
   bugs: BugRow[]
 ): Promise<string | null> {
-  // Build minimal context
   const severityDist = Object.entries(agg.severityCounts).map(([k, v]) => `${k}: ${v}`).join(", ");
   const topCategories = Object.entries(agg.categoryCounts).sort(([, a], [, b]) => b - a).slice(0, 10);
   const topComponents = Object.entries(agg.componentCounts).sort(([, a], [, b]) => b - a).slice(0, 10);
 
-  // For specific questions, include minimal relevant row data
-  const relevantSample = bugs.slice(0, 5).map((b) => ({
+  // Smart filtering: find rows relevant to the question
+  const qLower = question.toLowerCase();
+  const keywords = qLower.split(/\s+/).filter((w) => w.length > 2);
+
+  let relevantRows = bugs.filter((bug) => {
+    const text = `${bug.summary} ${bug.component} ${bug.category} ${bug.platform} ${bug.severity} ${bug.jiraId}`.toLowerCase();
+    return keywords.some((kw) => text.includes(kw));
+  });
+
+  // If no keyword matches, take a diverse sample
+  if (relevantRows.length === 0) {
+    relevantRows = bugs.slice(0, 20);
+  }
+
+  // Limit to 30 rows, compact format
+  const sampleRows = relevantRows.slice(0, 30).map((b) => ({
     id: b.jiraId,
-    summary: b.summary?.slice(0, 60),
-    severity: b.severity,
-    component: b.component,
-    category: b.category,
+    s: b.summary?.slice(0, 80),
+    sev: b.severity,
+    comp: b.component,
+    cat: b.category,
+    plat: b.platform,
+    repro: b.reproducibility,
   }));
 
-  const prompt = `You are a QA data analyst. Answer the user's question based on this bug data.
+  const prompt = `You are a QA data analyst. Answer the question using this bug data.
 
 STATS (${agg.total} bugs):
 - Severity: ${severityDist}
-- Top Categories: ${topCategories.map(([k, v]) => `${k}(${v})`).join(", ")}
-- Top Components: ${topComponents.map(([k, v]) => `${k}(${v})`).join(", ")}
+- Categories: ${topCategories.map(([k, v]) => `${k}(${v})`).join(", ")}
+- Components: ${topComponents.map(([k, v]) => `${k}(${v})`).join(", ")}
 - Platforms: ${Object.entries(agg.platformCounts).map(([k, v]) => `${k}(${v})`).join(", ")}
-- Sample bugs: ${JSON.stringify(relevantSample)}
+- Reproducibility: ${Object.entries(agg.reproducibilityCounts).map(([k, v]) => `${k}(${v})`).join(", ")}
 
-USER QUESTION: ${question}
+RELEVANT BUGS (${relevantRows.length} of ${bugs.length} matched):
+${JSON.stringify(sampleRows)}
 
-Answer concisely in markdown. Use data from above. If you can't answer from the data, say so.`;
+QUESTION: ${question}
 
-  try {
-    const res = await fetch(GROQ_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.3,
-        max_tokens: 600,
-      }),
-    });
+Answer concisely in markdown. Use actual data. If you can't fully answer from the data provided, say what's missing.`;
 
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.choices?.[0]?.message?.content || null;
-  } catch {
-    return null;
-  }
+  return callAI(apiKey, provider, model, [{ role: "user", content: prompt }], { maxTokens: 800 });
 }

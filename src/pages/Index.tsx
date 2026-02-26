@@ -5,26 +5,26 @@ import { KPICards } from "@/components/KPICards";
 import { SeverityPieChart } from "@/components/charts/SeverityPieChart";
 import { HBarChart } from "@/components/charts/HBarChart";
 import { VBarChart } from "@/components/charts/VBarChart";
+import { SeverityComponentHeatmap } from "@/components/charts/SeverityComponentHeatmap";
+import { SeverityPlatformMatrix } from "@/components/charts/SeverityPlatformMatrix";
+import { RiskRadarChart } from "@/components/charts/RiskRadarChart";
+import { ReproSeverityChart } from "@/components/charts/ReproSeverityChart";
 import { BugTable } from "@/components/BugTable";
 import { BugDetailDrawer } from "@/components/BugDetailDrawer";
 import { ManualMappingModal } from "@/components/ManualMappingModal";
 import { SettingsModal } from "@/components/SettingsModal";
 import { AIInsightsPanel } from "@/components/AIInsightsPanel";
+import { ExportBar } from "@/components/ExportBar";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { parseWorkbook, selectBestSheet, type SheetInfo } from "@/utils/excelParser";
 import { matchColumns } from "@/utils/columnMatcher";
 import { normalizeRows } from "@/utils/normalizer";
 import { aggregate } from "@/utils/aggregator";
 import { aiMapColumns } from "@/utils/aiMapper";
+import { getActiveApiKey, getActiveModel } from "@/utils/aiProviders";
 import {
-  saveBugData,
-  loadBugData,
-  saveTemplate,
-  loadTemplate,
-  savePreferences,
-  loadPreferences,
-  createFingerprint,
-  clearAllData,
+  saveBugData, loadBugData, saveTemplate, loadTemplate,
+  savePreferences, loadPreferences, createFingerprint, clearAllData,
 } from "@/utils/store";
 import type { BugRow, ColumnMapping, UserPreferences } from "@/types/bug";
 
@@ -37,14 +37,11 @@ export default function Dashboard() {
   const [selectedBug, setSelectedBug] = useState<BugRow | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">("dark");
   const [prefs, setPrefs] = useState<UserPreferences>(DEFAULT_PREFS);
-
-  // modals
   const [showMapping, setShowMapping] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [pendingSheet, setPendingSheet] = useState<SheetInfo | null>(null);
   const [pendingMapping, setPendingMapping] = useState<ColumnMapping | null>(null);
 
-  // load cached data on mount
   useEffect(() => {
     (async () => {
       const savedPrefs = await loadPreferences();
@@ -56,10 +53,7 @@ export default function Dashboard() {
         document.documentElement.classList.add("dark");
       }
       const cached = await loadBugData();
-      if (cached) {
-        setBugs(cached.rows);
-        setFileName(cached.fileName);
-      }
+      if (cached) { setBugs(cached.rows); setFileName(cached.fileName); }
     })();
   }, []);
 
@@ -79,80 +73,51 @@ export default function Dashboard() {
     await savePreferences(newPrefs);
   }, []);
 
-  const processSheet = useCallback(
-    async (sheet: SheetInfo, mapping: ColumnMapping, fName: string) => {
-      const rows = normalizeRows(sheet.sampleRows, mapping);
-      setBugs(rows);
-      setFileName(fName);
-      await saveBugData(rows, fName);
-      const fpId = createFingerprint(sheet.headers, sheet.name);
-      await saveTemplate({
-        id: fpId, headers: sheet.headers, sheetName: sheet.name,
-        mapping, createdAt: Date.now(),
-      });
-    }, []
-  );
+  const processSheet = useCallback(async (sheet: SheetInfo, mapping: ColumnMapping, fName: string) => {
+    const rows = normalizeRows(sheet.sampleRows, mapping);
+    setBugs(rows);
+    setFileName(fName);
+    await saveBugData(rows, fName);
+    const fpId = createFingerprint(sheet.headers, sheet.name);
+    await saveTemplate({ id: fpId, headers: sheet.headers, sheetName: sheet.name, mapping, createdAt: Date.now() });
+  }, []);
 
-  const handleFile = useCallback(
-    async (data: ArrayBuffer, fName: string) => {
+  const handleFile = useCallback(async (data: ArrayBuffer, fName: string) => {
+    setIsLoading(true);
+    try {
+      const sheets = parseWorkbook(data);
+      if (sheets.length === 0) { setIsLoading(false); return; }
+      const best = selectBestSheet(sheets);
+      const fpId = createFingerprint(best.headers, best.name);
+      const saved = await loadTemplate(fpId);
+      if (saved) { await processSheet(best, saved.mapping, fName); setIsLoading(false); return; }
+
+      const result = matchColumns(best.headers);
+      if (result.confidence >= 0.35) { await processSheet(best, result.mapping, fName); setIsLoading(false); return; }
+
+      const activeKey = getActiveApiKey(prefs);
+      if (prefs.aiEnabled && activeKey) {
+        const aiMapping = await aiMapColumns(activeKey, prefs.aiProvider || "groq", getActiveModel(prefs), best.name, best.headers, best.sampleRows.slice(0, 10));
+        if (aiMapping) { await processSheet(best, aiMapping, fName); setIsLoading(false); return; }
+      }
+
+      setPendingSheet(best);
+      setPendingMapping(result.mapping);
+      setShowMapping(true);
+    } catch (e) { console.error("Parse error:", e); }
+    setIsLoading(false);
+  }, [processSheet, prefs]);
+
+  const handleManualMapping = useCallback(async (mapping: ColumnMapping) => {
+    setShowMapping(false);
+    if (pendingSheet) {
       setIsLoading(true);
-      try {
-        const sheets = parseWorkbook(data);
-        if (sheets.length === 0) { setIsLoading(false); return; }
-        const best = selectBestSheet(sheets);
-
-        // check saved template
-        const fpId = createFingerprint(best.headers, best.name);
-        const saved = await loadTemplate(fpId);
-        if (saved) {
-          await processSheet(best, saved.mapping, fName);
-          setIsLoading(false);
-          return;
-        }
-
-        // deterministic matching
-        const result = matchColumns(best.headers);
-        if (result.confidence >= 0.35) {
-          await processSheet(best, result.mapping, fName);
-          setIsLoading(false);
-          return;
-        }
-
-        // AI mapping if enabled
-        if (prefs.aiEnabled && prefs.groqApiKey) {
-          const aiMapping = await aiMapColumns(prefs.groqApiKey, best.name, best.headers, best.sampleRows.slice(0, 10));
-          if (aiMapping) {
-            await processSheet(best, aiMapping, fName);
-            setIsLoading(false);
-            return;
-          }
-        }
-
-        // fallback: manual mapping
-        setPendingSheet(best);
-        setPendingMapping(result.mapping);
-        setShowMapping(true);
-      } catch (e) {
-        console.error("Parse error:", e);
-      }
+      await processSheet(pendingSheet, mapping, fileName || "uploaded.xlsx");
+      setPendingSheet(null);
+      setPendingMapping(null);
       setIsLoading(false);
-    },
-    [processSheet, prefs]
-  );
-
-  const handleManualMapping = useCallback(
-    async (mapping: ColumnMapping) => {
-      setShowMapping(false);
-      if (pendingSheet) {
-        setIsLoading(true);
-        await processSheet(pendingSheet, mapping, fileName || "uploaded.xlsx");
-        setPendingSheet(null);
-        setPendingMapping(null);
-        setIsLoading(false);
-      }
-    },
-    [pendingSheet, fileName, processSheet]
-  );
+    }
+  }, [pendingSheet, fileName, processSheet]);
 
   const handleClearCache = useCallback(async () => {
     await clearAllData();
@@ -162,6 +127,7 @@ export default function Dashboard() {
 
   const agg = useMemo(() => aggregate(bugs), [bugs]);
   const hasBugs = bugs.length > 0;
+  const activeKey = getActiveApiKey(prefs);
 
   return (
     <div className="min-h-screen bg-background">
@@ -176,36 +142,29 @@ export default function Dashboard() {
           <div className="flex items-center gap-2">
             {hasBugs && (
               <>
+                <ExportBar bugs={bugs} fileName={fileName} />
                 <label className="flex h-9 cursor-pointer items-center gap-1.5 rounded-md border bg-card px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted">
                   <UploadIcon className="h-3.5 w-3.5" />
-                  New File
-                  <input
-                    type="file"
-                    accept=".xlsx,.xls"
-                    className="hidden"
+                  New
+                  <input type="file" accept=".xlsx,.xls" className="hidden"
                     onChange={(e) => {
                       const file = e.target.files?.[0];
                       if (file) {
                         const reader = new FileReader();
-                        reader.onload = (ev) => {
-                          if (ev.target?.result) handleFile(ev.target.result as ArrayBuffer, file.name);
-                        };
+                        reader.onload = (ev) => { if (ev.target?.result) handleFile(ev.target.result as ArrayBuffer, file.name); };
                         reader.readAsArrayBuffer(file);
                       }
                     }}
                   />
                 </label>
-                <button
-                  onClick={handleClearCache}
+                <button onClick={handleClearCache}
                   className="flex h-9 items-center gap-1.5 rounded-md border bg-card px-3 text-xs font-medium text-destructive transition-colors hover:bg-destructive/10"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
-                  Clear
                 </button>
               </>
             )}
-            <button
-              onClick={() => setShowSettings(true)}
+            <button onClick={() => setShowSettings(true)}
               className="flex h-9 w-9 items-center justify-center rounded-md border bg-card text-foreground transition-colors hover:bg-muted"
               aria-label="Settings"
             >
@@ -224,17 +183,15 @@ export default function Dashboard() {
                 <Bug className="h-8 w-8 text-primary" />
               </div>
               <h2 className="text-2xl font-bold text-foreground">Bug Report Analytics</h2>
-              <p className="mt-2 text-muted-foreground">
-                Upload your Excel bug report to generate a client-ready analytics dashboard.
-              </p>
-              {prefs.aiEnabled && prefs.groqApiKey && (
+              <p className="mt-2 text-muted-foreground">Upload your Excel bug report to generate a client-ready analytics dashboard.</p>
+              {prefs.aiEnabled && activeKey && (
                 <p className="mt-1 text-xs text-primary">✨ AI-powered column detection active</p>
               )}
             </div>
             <FileUpload onFileLoaded={handleFile} isLoading={isLoading} />
           </div>
         ) : (
-          <>
+          <div id="dashboard-content" className="space-y-6">
             <KPICards agg={agg} fileName={fileName} />
 
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -243,41 +200,45 @@ export default function Dashboard() {
               <VBarChart data={agg.componentCounts} title="Issues by Component" />
             </div>
 
+            {/* Advanced Analytics */}
+            <div className="grid gap-4 md:grid-cols-2">
+              <SeverityComponentHeatmap bugs={bugs} />
+              <RiskRadarChart bugs={bugs} />
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <SeverityPlatformMatrix bugs={bugs} />
+              <ReproSeverityChart bugs={bugs} />
+            </div>
+
             <div className="grid gap-4 md:grid-cols-2">
               <HBarChart data={agg.platformCounts} title="Platform Distribution" color="hsl(var(--chart-4))" />
               <HBarChart data={agg.reproducibilityCounts} title="Reproducibility" color="hsl(var(--chart-5))" />
             </div>
 
-            {/* AI Insights - only when API key is configured */}
-            {prefs.aiEnabled && prefs.groqApiKey && (
-              <AIInsightsPanel apiKey={prefs.groqApiKey} agg={agg} bugs={bugs} />
+            {prefs.aiEnabled && activeKey && (
+              <AIInsightsPanel
+                apiKey={activeKey}
+                provider={prefs.aiProvider || "groq"}
+                model={getActiveModel(prefs)}
+                agg={agg}
+                bugs={bugs}
+              />
             )}
 
             <div>
               <h3 className="mb-3 text-sm font-semibold text-foreground">Defect List</h3>
               <BugTable rows={bugs} onSelectBug={setSelectedBug} />
             </div>
-          </>
+          </div>
         )}
       </main>
 
       <BugDetailDrawer bug={selectedBug} onClose={() => setSelectedBug(null)} />
-
       {showMapping && pendingSheet && pendingMapping && (
-        <ManualMappingModal
-          headers={pendingSheet.headers}
-          currentMapping={pendingMapping}
-          onConfirm={handleManualMapping}
-          onCancel={() => setShowMapping(false)}
-        />
+        <ManualMappingModal headers={pendingSheet.headers} currentMapping={pendingMapping} onConfirm={handleManualMapping} onCancel={() => setShowMapping(false)} />
       )}
-
-      <SettingsModal
-        open={showSettings}
-        onClose={() => setShowSettings(false)}
-        preferences={prefs}
-        onSave={handleSavePrefs}
-      />
+      <SettingsModal open={showSettings} onClose={() => setShowSettings(false)} preferences={prefs} onSave={handleSavePrefs} />
     </div>
   );
 }
