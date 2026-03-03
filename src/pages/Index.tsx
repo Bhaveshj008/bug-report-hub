@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { Bug, Trash2, Upload as UploadIcon, Settings } from "lucide-react";
 import { FileUpload } from "@/components/FileUpload";
+import { GoogleSheetsConnect } from "@/components/GoogleSheetsConnect";
 import { KPICards } from "@/components/KPICards";
 import { SeverityPieChart } from "@/components/charts/SeverityPieChart";
 import { HBarChart } from "@/components/charts/HBarChart";
@@ -22,11 +23,12 @@ import { normalizeRows } from "@/utils/normalizer";
 import { aggregate } from "@/utils/aggregator";
 import { aiMapColumns } from "@/utils/aiMapper";
 import { getActiveApiKey, getActiveModel } from "@/utils/aiProviders";
+import { detectDataFormat, getChartLabels } from "@/utils/dataDetector";
 import {
   saveBugData, loadBugData, saveTemplate, loadTemplate,
   savePreferences, loadPreferences, createFingerprint, clearAllData,
 } from "@/utils/store";
-import type { BugRow, ColumnMapping, UserPreferences } from "@/types/bug";
+import type { BugRow, ColumnMapping, UserPreferences, DataFormat, GoogleSheetsConfig } from "@/types/bug";
 
 const DEFAULT_PREFS: UserPreferences = { theme: "dark", aiEnabled: false };
 
@@ -41,6 +43,8 @@ export default function Dashboard() {
   const [showSettings, setShowSettings] = useState(false);
   const [pendingSheet, setPendingSheet] = useState<SheetInfo | null>(null);
   const [pendingMapping, setPendingMapping] = useState<ColumnMapping | null>(null);
+  const [dataFormat, setDataFormat] = useState<DataFormat>("bug_report");
+  const [googleConfig, setGoogleConfig] = useState<GoogleSheetsConfig | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -53,7 +57,12 @@ export default function Dashboard() {
         document.documentElement.classList.add("dark");
       }
       const cached = await loadBugData();
-      if (cached) { setBugs(cached.rows); setFileName(cached.fileName); }
+      if (cached) {
+        setBugs(cached.rows);
+        setFileName(cached.fileName);
+        if (cached.dataFormat) setDataFormat(cached.dataFormat);
+        if (cached.googleConfig) setGoogleConfig(cached.googleConfig);
+      }
     })();
   }, []);
 
@@ -73,14 +82,35 @@ export default function Dashboard() {
     await savePreferences(newPrefs);
   }, []);
 
-  const processSheet = useCallback(async (sheet: SheetInfo, mapping: ColumnMapping, fName: string) => {
+  const processSheet = useCallback(async (sheet: SheetInfo, mapping: ColumnMapping, fName: string, gConfig?: GoogleSheetsConfig) => {
+    const format = detectDataFormat(sheet.headers, sheet.sampleRows);
+    setDataFormat(format);
     const rows = normalizeRows(sheet.sampleRows, mapping);
     setBugs(rows);
     setFileName(fName);
-    await saveBugData(rows, fName);
+    const cfg = gConfig || googleConfig;
+    if (cfg) setGoogleConfig(cfg);
+    await saveBugData(rows, fName, format, cfg || undefined);
     const fpId = createFingerprint(sheet.headers, sheet.name);
     await saveTemplate({ id: fpId, headers: sheet.headers, sheetName: sheet.name, mapping, createdAt: Date.now() });
-  }, []);
+  }, [googleConfig]);
+
+  const processSheetWithMatching = useCallback(async (sheet: SheetInfo, fName: string, gConfig?: GoogleSheetsConfig) => {
+    const fpId = createFingerprint(sheet.headers, sheet.name);
+    const saved = await loadTemplate(fpId);
+    if (saved) { await processSheet(sheet, saved.mapping, fName, gConfig); return true; }
+
+    const result = matchColumns(sheet.headers);
+    if (result.confidence >= 0.35) { await processSheet(sheet, result.mapping, fName, gConfig); return true; }
+
+    const activeKey = getActiveApiKey(prefs);
+    if (prefs.aiEnabled && activeKey) {
+      const aiMapping = await aiMapColumns(activeKey, prefs.aiProvider || "groq", getActiveModel(prefs), sheet.name, sheet.headers, sheet.sampleRows.slice(0, 10));
+      if (aiMapping) { await processSheet(sheet, aiMapping, fName, gConfig); return true; }
+    }
+
+    return false;
+  }, [processSheet, prefs]);
 
   const handleFile = useCallback(async (data: ArrayBuffer, fName: string) => {
     setIsLoading(true);
@@ -88,25 +118,32 @@ export default function Dashboard() {
       const sheets = parseWorkbook(data);
       if (sheets.length === 0) { setIsLoading(false); return; }
       const best = selectBestSheet(sheets);
-      const fpId = createFingerprint(best.headers, best.name);
-      const saved = await loadTemplate(fpId);
-      if (saved) { await processSheet(best, saved.mapping, fName); setIsLoading(false); return; }
 
-      const result = matchColumns(best.headers);
-      if (result.confidence >= 0.35) { await processSheet(best, result.mapping, fName); setIsLoading(false); return; }
-
-      const activeKey = getActiveApiKey(prefs);
-      if (prefs.aiEnabled && activeKey) {
-        const aiMapping = await aiMapColumns(activeKey, prefs.aiProvider || "groq", getActiveModel(prefs), best.name, best.headers, best.sampleRows.slice(0, 10));
-        if (aiMapping) { await processSheet(best, aiMapping, fName); setIsLoading(false); return; }
+      const matched = await processSheetWithMatching(best, fName);
+      if (!matched) {
+        const result = matchColumns(best.headers);
+        setPendingSheet(best);
+        setPendingMapping(result.mapping);
+        setShowMapping(true);
       }
-
-      setPendingSheet(best);
-      setPendingMapping(result.mapping);
-      setShowMapping(true);
     } catch (e) { console.error("Parse error:", e); }
     setIsLoading(false);
-  }, [processSheet, prefs]);
+  }, [processSheetWithMatching]);
+
+  const handleGoogleSheet = useCallback(async (sheet: SheetInfo, config: GoogleSheetsConfig) => {
+    setIsLoading(true);
+    try {
+      const fName = `Google Sheet: ${sheet.name}`;
+      const matched = await processSheetWithMatching(sheet, fName, config);
+      if (!matched) {
+        const result = matchColumns(sheet.headers);
+        setPendingSheet(sheet);
+        setPendingMapping(result.mapping);
+        setShowMapping(true);
+      }
+    } catch (e) { console.error("Google Sheet error:", e); }
+    setIsLoading(false);
+  }, [processSheetWithMatching]);
 
   const handleManualMapping = useCallback(async (mapping: ColumnMapping) => {
     setShowMapping(false);
@@ -123,9 +160,20 @@ export default function Dashboard() {
     await clearAllData();
     setBugs([]);
     setFileName("");
+    setGoogleConfig(null);
+    setDataFormat("bug_report");
+  }, []);
+
+  const handleDisconnectGoogle = useCallback(async () => {
+    setGoogleConfig(null);
+    await clearAllData();
+    setBugs([]);
+    setFileName("");
+    setDataFormat("bug_report");
   }, []);
 
   const agg = useMemo(() => aggregate(bugs), [bugs]);
+  const labels = useMemo(() => getChartLabels(dataFormat), [dataFormat]);
   const hasBugs = bugs.length > 0;
   const activeKey = getActiveApiKey(prefs);
 
@@ -183,24 +231,45 @@ export default function Dashboard() {
                 <Bug className="h-8 w-8 text-primary" />
               </div>
               <h2 className="text-2xl font-bold text-foreground">Bug Report Analytics</h2>
-              <p className="mt-2 text-muted-foreground">Upload your Excel bug report to generate a client-ready analytics dashboard.</p>
+              <p className="mt-2 text-muted-foreground">Upload Excel or connect Google Sheets to generate analytics.</p>
               {prefs.aiEnabled && activeKey && (
                 <p className="mt-1 text-xs text-primary">✨ AI-powered column detection active</p>
               )}
             </div>
-            <FileUpload onFileLoaded={handleFile} isLoading={isLoading} />
+            <div className="space-y-4">
+              <FileUpload onFileLoaded={handleFile} isLoading={isLoading} />
+              <div className="flex items-center gap-3">
+                <div className="h-px flex-1 bg-border" />
+                <span className="text-xs text-muted-foreground">or</span>
+                <div className="h-px flex-1 bg-border" />
+              </div>
+              <GoogleSheetsConnect
+                googleApiKey={prefs.googleSheetsApiKey}
+                onSheetLoaded={handleGoogleSheet}
+                activeConfig={null}
+                onDisconnect={() => {}}
+              />
+            </div>
           </div>
         ) : (
           <div id="dashboard-content" className="space-y-6">
-            <KPICards agg={agg} fileName={fileName} />
+            {googleConfig && (
+              <GoogleSheetsConnect
+                googleApiKey={prefs.googleSheetsApiKey}
+                onSheetLoaded={handleGoogleSheet}
+                activeConfig={googleConfig}
+                onDisconnect={handleDisconnectGoogle}
+              />
+            )}
+
+            <KPICards agg={agg} fileName={fileName} dataFormat={dataFormat} />
 
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              <SeverityPieChart data={agg.severityCounts} />
-              <HBarChart data={agg.categoryCounts} title="Issues by Category" color="hsl(var(--chart-3))" />
-              <VBarChart data={agg.componentCounts} title="Issues by Component" />
+              <SeverityPieChart data={agg.severityCounts} title={labels.severity} />
+              <HBarChart data={agg.categoryCounts} title={labels.category} color="hsl(var(--chart-3))" />
+              <VBarChart data={agg.componentCounts} title={labels.component} />
             </div>
 
-            {/* Advanced Analytics */}
             <div className="grid gap-4 md:grid-cols-2">
               <SeverityComponentHeatmap bugs={bugs} />
               <RiskRadarChart bugs={bugs} />
@@ -212,8 +281,8 @@ export default function Dashboard() {
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
-              <HBarChart data={agg.platformCounts} title="Platform Distribution" color="hsl(var(--chart-4))" />
-              <HBarChart data={agg.reproducibilityCounts} title="Reproducibility" color="hsl(var(--chart-5))" />
+              <HBarChart data={agg.platformCounts} title={labels.platform} color="hsl(var(--chart-4))" />
+              <HBarChart data={agg.reproducibilityCounts} title={labels.reproducibility} color="hsl(var(--chart-5))" />
             </div>
 
             {prefs.aiEnabled && activeKey && (
@@ -227,7 +296,7 @@ export default function Dashboard() {
             )}
 
             <div>
-              <h3 className="mb-3 text-sm font-semibold text-foreground">Defect List</h3>
+              <h3 className="mb-3 text-sm font-semibold text-foreground">{labels.listTitle}</h3>
               <BugTable rows={bugs} onSelectBug={setSelectedBug} />
             </div>
           </div>

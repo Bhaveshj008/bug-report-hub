@@ -28,6 +28,8 @@ export type MappingConfidence = {
   unmappedHeaders: string[];
 };
 
+export type DataFormat = "bug_report" | "test_case" | "generic";
+
 export type Aggregations = {
   total: number;
   severityCounts: Record<string, number>;
@@ -57,6 +59,14 @@ export type AIProviderConfig = {
   keyUrl: string;
 };
 
+export type GoogleSheetsConfig = {
+  url: string;
+  sheetId: string;
+  gid?: string;
+  pollInterval: number; // seconds, 0 = disabled
+  lastFetched?: number;
+};
+
 export type UserPreferences = {
   theme: "light" | "dark";
   aiEnabled: boolean;
@@ -65,4 +75,5 @@ export type UserPreferences = {
   aiProvider?: AIProvider;
   aiModel?: string;
   apiKeys?: Partial<Record<AIProvider, string>>;
+  googleSheetsApiKey?: string;
 };
