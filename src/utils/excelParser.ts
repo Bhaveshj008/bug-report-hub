@@ -8,10 +8,12 @@ export type SheetInfo = {
   sampleRows: Record<string, string>[];
 };
 
-const BUG_KEYWORDS = [
+const DATA_KEYWORDS = [
   "jira", "defect", "bug", "severity", "priority", "component",
   "steps", "reproduce", "expected", "actual", "platform", "category",
   "issue", "summary", "ticket", "reproducibility",
+  "test case", "test objective", "status", "precondition",
+  "test procedure", "module", "feature", "pass", "fail",
 ];
 
 function detectHeaderRow(sheet: XLSX.WorkSheet): number {
@@ -28,7 +30,7 @@ function detectHeaderRow(sheet: XLSX.WorkSheet): number {
       if (cell && cell.v != null) {
         nonEmpty++;
         const val = String(cell.v).toLowerCase();
-        for (const kw of BUG_KEYWORDS) {
+      for (const kw of DATA_KEYWORDS) {
           if (val.includes(kw)) { score += 2; break; }
         }
       }
@@ -89,7 +91,7 @@ export function selectBestSheet(sheets: SheetInfo[]): SheetInfo {
     let score = s.rowCount;
     for (const h of s.headers) {
       const lower = h.toLowerCase();
-      for (const kw of BUG_KEYWORDS) {
+      for (const kw of DATA_KEYWORDS) {
         if (lower.includes(kw)) { score += 10; break; }
       }
     }

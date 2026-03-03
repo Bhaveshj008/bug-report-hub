@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
-import { Settings, X, Eye, EyeOff, Sparkles, ChevronDown } from "lucide-react";
+import { Settings, X, Eye, EyeOff, Sparkles, ChevronDown, Link2 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { AI_PROVIDERS, getProviderConfig, getActiveApiKey } from "@/utils/aiProviders";
+import { AI_PROVIDERS, getProviderConfig } from "@/utils/aiProviders";
 import type { AIProvider, UserPreferences } from "@/types/bug";
 
 interface SettingsModalProps {
@@ -19,15 +19,17 @@ export function SettingsModal({ open, onClose, preferences, onSave }: SettingsMo
   const [model, setModel] = useState(preferences.aiModel || "");
   const [apiKeys, setApiKeys] = useState<Partial<Record<AIProvider, string>>>(preferences.apiKeys || {});
   const [showKey, setShowKey] = useState(false);
+  const [googleKey, setGoogleKey] = useState(preferences.googleSheetsApiKey || "");
+  const [showGoogleKey, setShowGoogleKey] = useState(false);
 
   useEffect(() => {
     setAiEnabled(preferences.aiEnabled);
     setProvider(preferences.aiProvider || "groq");
     setModel(preferences.aiModel || "");
     const keys = { ...(preferences.apiKeys || {}) };
-    // Backward compat
     if (preferences.groqApiKey && !keys.groq) keys.groq = preferences.groqApiKey;
     setApiKeys(keys);
+    setGoogleKey(preferences.googleSheetsApiKey || "");
   }, [preferences, open]);
 
   if (!open) return null;
@@ -44,6 +46,7 @@ export function SettingsModal({ open, onClose, preferences, onSave }: SettingsMo
       aiModel: activeModel,
       apiKeys,
       groqApiKey: apiKeys.groq,
+      googleSheetsApiKey: googleKey || undefined,
     });
     onClose();
   };
@@ -63,6 +66,41 @@ export function SettingsModal({ open, onClose, preferences, onSave }: SettingsMo
         </div>
 
         <div className="space-y-5 px-5 py-5">
+          {/* Google Sheets API Key */}
+          <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+            <div className="flex items-center gap-2">
+              <Link2 className="h-4 w-4 text-primary" />
+              <Label className="text-sm font-medium text-foreground">Google Sheets API Key</Label>
+              <span className="text-[10px] text-muted-foreground">(optional)</span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              For private sheets. Public sheets work without a key.
+            </p>
+            <div className="relative">
+              <Input
+                type={showGoogleKey ? "text" : "password"}
+                value={googleKey}
+                onChange={(e) => setGoogleKey(e.target.value)}
+                placeholder="AIza..."
+                className="pr-10 font-mono text-xs"
+              />
+              <button
+                type="button"
+                onClick={() => setShowGoogleKey(!showGoogleKey)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                {showGoogleKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              Get key at{" "}
+              <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" className="text-primary underline">
+                Google Cloud Console
+              </a>
+              . Enable Google Sheets API.
+            </p>
+          </div>
+
           {/* AI Toggle */}
           <div className="flex items-center justify-between rounded-lg border bg-muted/30 p-4">
             <div className="flex items-center gap-3">
@@ -88,11 +126,7 @@ export function SettingsModal({ open, onClose, preferences, onSave }: SettingsMo
                   {AI_PROVIDERS.map((p) => (
                     <button
                       key={p.id}
-                      onClick={() => {
-                        setProvider(p.id);
-                        setModel("");
-                        setShowKey(false);
-                      }}
+                      onClick={() => { setProvider(p.id); setModel(""); setShowKey(false); }}
                       className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-left text-sm transition-all ${
                         provider === p.id
                           ? "border-primary bg-primary/5 text-foreground ring-1 ring-primary/30"
@@ -100,9 +134,7 @@ export function SettingsModal({ open, onClose, preferences, onSave }: SettingsMo
                       }`}
                     >
                       <span className="font-medium">{p.name}</span>
-                      {apiKeys[p.id] && (
-                        <span className="ml-auto h-2 w-2 rounded-full bg-chart-low" />
-                      )}
+                      {apiKeys[p.id] && <span className="ml-auto h-2 w-2 rounded-full bg-chart-low" />}
                     </button>
                   ))}
                 </div>
@@ -153,22 +185,14 @@ export function SettingsModal({ open, onClose, preferences, onSave }: SettingsMo
                 </p>
               </div>
 
-              {/* Status */}
               {currentKey && (
                 <div className="rounded-md border border-chart-low/30 bg-chart-low/5 px-3 py-2">
                   <p className="text-xs text-foreground">
-                    ✓ {config.name} key configured. AI features active:
+                    ✓ {config.name} key configured. AI features active.
                   </p>
-                  <ul className="mt-1 text-xs text-muted-foreground list-disc list-inside space-y-0.5">
-                    <li>Smart column mapping when auto-detection fails</li>
-                    <li>Bug data insights & trend analysis</li>
-                    <li>RAG-powered Q&A over your full dataset</li>
-                    <li>Actionable recommendations</li>
-                  </ul>
                 </div>
               )}
 
-              {/* Configured keys summary */}
               {Object.entries(apiKeys).filter(([, v]) => v).length > 1 && (
                 <div className="rounded-md border bg-muted/30 px-3 py-2">
                   <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Configured Providers</p>

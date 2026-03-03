@@ -2,22 +2,22 @@ import type { CanonicalField, ColumnMapping, MappingConfidence } from "@/types/b
 
 const SYNONYMS: Record<CanonicalField, string[]> = {
   app: ["app", "application", "app name", "project"],
-  jiraId: ["jira id", "jira", "ticket", "issue id", "bug id", "defect id", "id", "ticket id", "key"],
-  summary: ["defect summary", "summary", "title", "bug summary", "issue", "description", "defect description", "bug title"],
-  severity: ["severity", "bug severity", "priority", "sev", "level"],
-  component: ["component", "module", "feature", "area", "section"],
+  jiraId: ["jira id", "jira", "ticket", "issue id", "bug id", "defect id", "id", "ticket id", "key", "test case id", "tc id", "sr. no", "sr no", "serial no", "s.no", "test id"],
+  summary: ["defect summary", "summary", "title", "bug summary", "issue", "description", "defect description", "bug title", "test objectives", "test objective", "objective", "test name"],
+  severity: ["severity", "bug severity", "priority", "sev", "level", "priority level"],
+  component: ["component", "module", "feature", "area", "section", "category/module", "category/ module", "module name", "modules"],
   userRole: ["user role", "role", "user type", "persona"],
-  testData: ["test data", "data", "test input"],
-  platform: ["platform", "browser", "device", "environment", "env"],
+  testData: ["test data", "data", "test input", "test cases count"],
+  platform: ["platform", "browser", "device", "environment", "env", "precondition", "pre-condition", "pre condition"],
   osVersion: ["os version", "os", "android version", "ios version", "version"],
-  category: ["issue category", "bug category", "category", "type", "defect type", "bug type", "issue type"],
-  reproducibility: ["reproducibility", "repro", "frequency", "occurrence", "reproducible"],
-  steps: ["reproduction steps", "steps", "steps to reproduce", "str", "repro steps", "how to reproduce"],
+  category: ["issue category", "bug category", "category", "type", "defect type", "bug type", "issue type", "sub module", "submodule", "sub-module", "features"],
+  reproducibility: ["reproducibility", "repro", "frequency", "occurrence", "reproducible", "status", "test status", "execution status", "result"],
+  steps: ["reproduction steps", "steps", "steps to reproduce", "str", "repro steps", "how to reproduce", "test procedure", "procedure", "test steps"],
   expected: ["expected results", "expected", "expected behavior", "expected result", "expected outcome"],
   actual: ["actual results", "actual", "actual behavior", "actual result", "actual outcome"],
-  artifactsLink: ["artifacts", "drive link", "evidence", "attachments", "link", "artifacts name", "screenshot", "artifacts name / drive link"],
+  artifactsLink: ["artifacts", "drive link", "evidence", "attachments", "link", "artifacts name", "screenshot", "artifacts name / drive link", "test case range"],
   qaComments: ["qa comments", "qa comment", "qa notes", "qa feedback", "tester comments"],
-  comments: ["comments", "comment", "notes", "remarks", "additional comments"],
+  comments: ["comments", "comment", "notes", "remarks", "additional comments", "bug id"],
 };
 
 function normalize(s: string): string {

@@ -2,6 +2,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from "recha
 
 interface SeverityPieChartProps {
   data: Record<string, number>;
+  title?: string;
 }
 
 const SEVERITY_COLORS: Record<string, string> = {
@@ -20,12 +21,12 @@ const DEFAULT_COLORS = [
   "hsl(0, 72%, 51%)",
 ];
 
-export function SeverityPieChart({ data }: SeverityPieChartProps) {
+export function SeverityPieChart({ data, title }: SeverityPieChartProps) {
   const chartData = Object.entries(data).map(([name, value]) => ({ name, value }));
 
   return (
     <div className="rounded-lg border bg-card p-4 animate-fade-in">
-      <h3 className="mb-3 text-sm font-semibold text-foreground">Severity Distribution</h3>
+      <h3 className="mb-3 text-sm font-semibold text-foreground">{title || "Severity Distribution"}</h3>
       <ResponsiveContainer width="100%" height={260}>
         <PieChart>
           <Pie
