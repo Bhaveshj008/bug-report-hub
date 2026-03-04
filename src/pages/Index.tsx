@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useMemo } from "react";
 import { Bug, Trash2, Upload as UploadIcon, Settings } from "lucide-react";
 import { FileUpload } from "@/components/FileUpload";
 import { GoogleSheetsConnect } from "@/components/GoogleSheetsConnect";
+import { SheetSelector } from "@/components/SheetSelector";
 import { KPICards } from "@/components/KPICards";
 import { SeverityPieChart } from "@/components/charts/SeverityPieChart";
 import { HBarChart } from "@/components/charts/HBarChart";
@@ -17,7 +18,7 @@ import { SettingsModal } from "@/components/SettingsModal";
 import { AIInsightsPanel } from "@/components/AIInsightsPanel";
 import { ExportBar } from "@/components/ExportBar";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { parseWorkbook, selectBestSheet, type SheetInfo } from "@/utils/excelParser";
+import { parseWorkbook, type SheetInfo } from "@/utils/excelParser";
 import { matchColumns } from "@/utils/columnMatcher";
 import { normalizeRows } from "@/utils/normalizer";
 import { aggregate } from "@/utils/aggregator";
@@ -45,6 +46,8 @@ export default function Dashboard() {
   const [pendingMapping, setPendingMapping] = useState<ColumnMapping | null>(null);
   const [dataFormat, setDataFormat] = useState<DataFormat>("bug_report");
   const [googleConfig, setGoogleConfig] = useState<GoogleSheetsConfig | null>(null);
+  const [pendingSheets, setPendingSheets] = useState<SheetInfo[] | null>(null);
+  const [pendingFileName, setPendingFileName] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -101,7 +104,7 @@ export default function Dashboard() {
     if (saved) { await processSheet(sheet, saved.mapping, fName, gConfig); return true; }
 
     const result = matchColumns(sheet.headers);
-    if (result.confidence >= 0.35) { await processSheet(sheet, result.mapping, fName, gConfig); return true; }
+    if (result.confidence >= 0.2) { await processSheet(sheet, result.mapping, fName, gConfig); return true; }
 
     const activeKey = getActiveApiKey(prefs);
     if (prefs.aiEnabled && activeKey) {
@@ -117,33 +120,42 @@ export default function Dashboard() {
     try {
       const sheets = parseWorkbook(data);
       if (sheets.length === 0) { setIsLoading(false); return; }
-      const best = selectBestSheet(sheets);
 
-      const matched = await processSheetWithMatching(best, fName);
-      if (!matched) {
-        const result = matchColumns(best.headers);
-        setPendingSheet(best);
-        setPendingMapping(result.mapping);
-        setShowMapping(true);
+      if (sheets.length > 1) {
+        // Show sheet selector for multi-sheet workbooks
+        setPendingSheets(sheets);
+        setPendingFileName(fName);
+        setIsLoading(false);
+        return;
       }
+
+      await processSelectedSheet(sheets[0], fName);
     } catch (e) { console.error("Parse error:", e); }
     setIsLoading(false);
   }, [processSheetWithMatching]);
 
-  const handleGoogleSheet = useCallback(async (sheet: SheetInfo, config: GoogleSheetsConfig) => {
+  const processSelectedSheet = useCallback(async (sheet: SheetInfo, fName: string, gConfig?: GoogleSheetsConfig) => {
     setIsLoading(true);
     try {
-      const fName = `Google Sheet: ${sheet.name}`;
-      const matched = await processSheetWithMatching(sheet, fName, config);
+      const matched = await processSheetWithMatching(sheet, fName, gConfig);
       if (!matched) {
         const result = matchColumns(sheet.headers);
         setPendingSheet(sheet);
         setPendingMapping(result.mapping);
         setShowMapping(true);
       }
-    } catch (e) { console.error("Google Sheet error:", e); }
+    } catch (e) { console.error("Process error:", e); }
     setIsLoading(false);
   }, [processSheetWithMatching]);
+
+  const handleSheetSelected = useCallback(async (sheet: SheetInfo) => {
+    setPendingSheets(null);
+    await processSelectedSheet(sheet, pendingFileName);
+  }, [pendingFileName, processSelectedSheet]);
+
+  const handleGoogleSheet = useCallback(async (sheet: SheetInfo, config: GoogleSheetsConfig) => {
+    await processSelectedSheet(sheet, `Google Sheet: ${sheet.name}`, config);
+  }, [processSelectedSheet]);
 
   const handleManualMapping = useCallback(async (mapping: ColumnMapping) => {
     setShowMapping(false);
@@ -304,6 +316,9 @@ export default function Dashboard() {
       </main>
 
       <BugDetailDrawer bug={selectedBug} onClose={() => setSelectedBug(null)} />
+      {pendingSheets && (
+        <SheetSelector sheets={pendingSheets} onSelect={handleSheetSelected} onCancel={() => setPendingSheets(null)} />
+      )}
       {showMapping && pendingSheet && pendingMapping && (
         <ManualMappingModal headers={pendingSheet.headers} currentMapping={pendingMapping} onConfirm={handleManualMapping} onCancel={() => setShowMapping(false)} />
       )}
