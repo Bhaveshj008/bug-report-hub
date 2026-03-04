@@ -1,8 +1,8 @@
 import { openDB, type DBSchema } from "idb";
-import type { BugRow, TemplateFingerprint, UserPreferences, GoogleSheetsConfig, DataFormat } from "@/types/bug";
+import type { RawRow, TemplateFingerprint, UserPreferences, GoogleSheetsConfig, DataFormat } from "@/types/bug";
 
 interface BugDashDB extends DBSchema {
-  bugs: { key: string; value: { id: string; rows: BugRow[]; fileName: string; timestamp: number; dataFormat?: DataFormat; googleConfig?: GoogleSheetsConfig } };
+  bugs: { key: string; value: { id: string; rows: RawRow[]; fileName: string; timestamp: number; dataFormat?: DataFormat; googleConfig?: GoogleSheetsConfig } };
   templates: { key: string; value: TemplateFingerprint };
   preferences: { key: string; value: UserPreferences };
 }
@@ -20,12 +20,12 @@ function getDB() {
   });
 }
 
-export async function saveBugData(rows: BugRow[], fileName: string, dataFormat?: DataFormat, googleConfig?: GoogleSheetsConfig) {
+export async function saveBugData(rows: RawRow[], fileName: string, dataFormat?: DataFormat, googleConfig?: GoogleSheetsConfig) {
   const db = await getDB();
   await db.put("bugs", { id: "latest", rows, fileName, timestamp: Date.now(), dataFormat, googleConfig }, "latest");
 }
 
-export async function loadBugData(): Promise<{ rows: BugRow[]; fileName: string; timestamp: number; dataFormat?: DataFormat; googleConfig?: GoogleSheetsConfig } | undefined> {
+export async function loadBugData(): Promise<{ rows: RawRow[]; fileName: string; timestamp: number; dataFormat?: DataFormat; googleConfig?: GoogleSheetsConfig } | undefined> {
   const db = await getDB();
   return db.get("bugs", "latest");
 }
