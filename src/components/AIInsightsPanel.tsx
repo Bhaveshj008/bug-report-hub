@@ -2,14 +2,14 @@ import { useState, useCallback } from "react";
 import { Sparkles, Send, Loader2, RefreshCw, MessageSquare, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { generateInsights, askAboutBugs } from "@/utils/aiInsights";
-import type { Aggregations, BugRow, AIProvider } from "@/types/bug";
+import type { DynamicAggregations, RawRow, AIProvider } from "@/types/bug";
 
 interface AIInsightsPanelProps {
   apiKey: string;
   provider: AIProvider;
   model: string;
-  agg: Aggregations;
-  bugs: BugRow[];
+  agg: DynamicAggregations;
+  bugs: RawRow[];
 }
 
 export function AIInsightsPanel({ apiKey, provider, model, agg, bugs }: AIInsightsPanelProps) {
@@ -63,17 +63,13 @@ export function AIInsightsPanel({ apiKey, provider, model, agg, bugs }: AIInsigh
             </span>
           </div>
           <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setShowChat(!showChat)}
-              className="flex h-7 items-center gap-1 rounded-md border px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-            >
-              <MessageSquare className="h-3 w-3" />
-              Ask
+            <button onClick={() => setShowChat(!showChat)}
+              className="flex h-7 items-center gap-1 rounded-md border px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">
+              <MessageSquare className="h-3 w-3" /> Ask
             </button>
             {insights && (
               <button onClick={handleGenerate} disabled={loading}
-                className="flex h-7 items-center gap-1 rounded-md border px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-              >
+                className="flex h-7 items-center gap-1 rounded-md border px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">
                 <RefreshCw className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} />
               </button>
             )}
@@ -88,20 +84,18 @@ export function AIInsightsPanel({ apiKey, provider, model, agg, bugs }: AIInsigh
               </div>
               <p className="text-sm font-medium text-foreground">Generate AI-Powered Insights</p>
               <p className="mt-1 text-xs text-muted-foreground max-w-xs">
-                Analyzes severity distributions, risk areas, and trends. Sends only aggregated stats — never raw data.
+                Analyzes your data distributions, patterns, and trends. Sends only aggregated stats — never raw data.
               </p>
               <button onClick={handleGenerate}
-                className="mt-4 flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
-              >
-                <Sparkles className="h-3.5 w-3.5" />
-                Generate Insights
+                className="mt-4 flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90">
+                <Sparkles className="h-3.5 w-3.5" /> Generate Insights
               </button>
             </div>
           )}
           {loading && (
             <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
-              <span className="text-sm">Analyzing {agg.total} bugs with {providerLabel}...</span>
+              <span className="text-sm">Analyzing {agg.total} rows with {providerLabel}...</span>
             </div>
           )}
           {error && (
@@ -115,13 +109,12 @@ export function AIInsightsPanel({ apiKey, provider, model, agg, bugs }: AIInsigh
         </div>
       </div>
 
-      {/* Q&A Chat - RAG-powered */}
       {showChat && (
         <div className="rounded-lg border bg-card animate-fade-in">
           <div className="flex items-center justify-between border-b px-4 py-3">
             <div className="flex items-center gap-2">
               <MessageSquare className="h-4 w-4 text-primary" />
-              <h3 className="text-sm font-semibold text-foreground">Ask About Your Bugs</h3>
+              <h3 className="text-sm font-semibold text-foreground">Ask About Your Data</h3>
               <span className="rounded-full bg-accent px-2 py-0.5 text-[10px] font-medium text-accent-foreground">RAG</span>
             </div>
             <button onClick={() => setShowChat(false)} className="text-muted-foreground hover:text-foreground">
@@ -132,12 +125,11 @@ export function AIInsightsPanel({ apiKey, provider, model, agg, bugs }: AIInsigh
           <div className="max-h-64 overflow-y-auto p-4 space-y-3">
             {chatHistory.length === 0 && (
               <div className="text-center py-2 space-y-2">
-                <p className="text-xs text-muted-foreground">
-                  Ask anything about your Excel data. The AI searches relevant rows to answer precisely.
-                </p>
+                <p className="text-xs text-muted-foreground">Ask anything about your data. The AI searches relevant rows to answer precisely.</p>
                 <div className="flex flex-wrap justify-center gap-1.5">
-                  {["What are the riskiest components?", "How many critical bugs on Android?", "Summarize reproducibility patterns"].map((s) => (
-                    <button key={s} onClick={() => { setQuestion(s); }} className="rounded-full border bg-muted/50 px-2.5 py-1 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground">
+                  {["What patterns do you see?", "What are the top categories?", "Summarize the key findings"].map(s => (
+                    <button key={s} onClick={() => setQuestion(s)}
+                      className="rounded-full border bg-muted/50 px-2.5 py-1 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground">
                       {s}
                     </button>
                   ))}
@@ -168,12 +160,10 @@ export function AIInsightsPanel({ apiKey, provider, model, agg, bugs }: AIInsigh
             <div className="flex gap-2">
               <input type="text" value={question} onChange={(e) => setQuestion(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && !chatLoading && handleAsk()}
-                placeholder="Ask about your bug data..."
-                className="flex-1 rounded-md border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-              />
+                placeholder="Ask about your data..."
+                className="flex-1 rounded-md border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
               <button onClick={handleAsk} disabled={chatLoading || !question.trim()}
-                className="flex h-9 w-9 items-center justify-center rounded-md bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50"
-              >
+                className="flex h-9 w-9 items-center justify-center rounded-md bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50">
                 <Send className="h-3.5 w-3.5" />
               </button>
             </div>

@@ -1,19 +1,12 @@
-import type { BugRow } from "@/types/bug";
+import type { RawRow } from "@/types/bug";
 
 /**
- * Export filtered bug data as CSV
+ * Export data as CSV — works with any column structure
  */
-export function exportCSV(rows: BugRow[], fileName: string = "bugs-export.csv") {
-  const headers = [
-    "Jira ID", "Summary", "Severity", "Component", "Category",
-    "Platform", "OS Version", "Reproducibility", "User Role",
-    "Steps", "Expected", "Actual", "Artifacts Link", "QA Comments", "Comments",
-  ];
-  const keys: (keyof BugRow)[] = [
-    "jiraId", "summary", "severity", "component", "category",
-    "platform", "osVersion", "reproducibility", "userRole",
-    "steps", "expected", "actual", "artifactsLink", "qaComments", "comments",
-  ];
+export function exportCSV(rows: RawRow[], fileName: string = "export.csv") {
+  if (rows.length === 0) return;
+
+  const headers = Object.keys(rows[0]);
 
   const escape = (val: string) => {
     if (val.includes(",") || val.includes('"') || val.includes("\n")) {
@@ -24,7 +17,7 @@ export function exportCSV(rows: BugRow[], fileName: string = "bugs-export.csv") 
 
   const csv = [
     headers.join(","),
-    ...rows.map((row) => keys.map((k) => escape(row[k] || "")).join(",")),
+    ...rows.map((row) => headers.map((h) => escape(row[h] || "")).join(",")),
   ].join("\n");
 
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -39,7 +32,7 @@ export function exportCSV(rows: BugRow[], fileName: string = "bugs-export.csv") 
 /**
  * Export dashboard as PDF using html2canvas + jsPDF
  */
-export async function exportPDF(elementId: string, fileName: string = "bug-report.pdf") {
+export async function exportPDF(elementId: string, fileName: string = "report.pdf") {
   const { default: html2canvas } = await import("html2canvas");
   const { jsPDF } = await import("jspdf");
 
@@ -54,8 +47,8 @@ export async function exportPDF(elementId: string, fileName: string = "bug-repor
   });
 
   const imgData = canvas.toDataURL("image/png");
-  const imgWidth = 210; // A4 width in mm
-  const pageHeight = 297; // A4 height in mm
+  const imgWidth = 210;
+  const pageHeight = 297;
   const imgHeight = (canvas.height * imgWidth) / canvas.width;
 
   const pdf = new jsPDF("p", "mm", "a4");

@@ -1,9 +1,9 @@
 import { Download, FileText } from "lucide-react";
 import { exportCSV, exportPDF } from "@/utils/exportUtils";
-import type { BugRow } from "@/types/bug";
+import type { RawRow } from "@/types/bug";
 
 interface ExportBarProps {
-  bugs: BugRow[];
+  bugs: RawRow[];
   fileName: string;
 }
 
@@ -13,7 +13,7 @@ export function ExportBar({ bugs, fileName }: ExportBarProps) {
   return (
     <div className="flex items-center gap-2">
       <button
-        onClick={() => exportCSV(bugs, `${baseName}-bugs.csv`)}
+        onClick={() => exportCSV(bugs, `${baseName}-export.csv`)}
         className="flex h-9 items-center gap-1.5 rounded-md border bg-card px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted"
       >
         <Download className="h-3.5 w-3.5" />

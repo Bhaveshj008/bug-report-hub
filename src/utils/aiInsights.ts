@@ -1,114 +1,96 @@
-import type { Aggregations, BugRow, AIProvider } from "@/types/bug";
+import type { DynamicAggregations, RawRow, AIProvider } from "@/types/bug";
 import { callAI } from "./aiProviders";
 
 /**
- * Generates AI insights from AGGREGATED data only — never sends raw rows.
+ * Generates AI insights from data — sends column distributions, never all raw rows.
  */
 export async function generateInsights(
   apiKey: string,
   provider: AIProvider,
   model: string,
-  agg: Aggregations,
-  bugs: BugRow[]
+  agg: DynamicAggregations,
+  bugs: RawRow[]
 ): Promise<string | null> {
-  const topCategories = Object.entries(agg.categoryCounts).sort(([, a], [, b]) => b - a).slice(0, 8);
-  const topComponents = Object.entries(agg.componentCounts).sort(([, a], [, b]) => b - a).slice(0, 8);
-  const severityDist = Object.entries(agg.severityCounts).sort(([, a], [, b]) => b - a);
-  const platformDist = Object.entries(agg.platformCounts).sort(([, a], [, b]) => b - a).slice(0, 5);
-  const reproDist = Object.entries(agg.reproducibilityCounts).sort(([, a], [, b]) => b - a);
+  const headers = bugs.length > 0 ? Object.keys(bugs[0]) : [];
+  
+  // Build column summaries
+  const columnSummaries = Object.entries(agg.columnCounts)
+    .map(([col, counts]) => {
+      const top = Object.entries(counts).sort(([, a], [, b]) => b - a).slice(0, 8);
+      return `${col}: ${top.map(([k, v]) => `${k}(${v})`).join(", ")}`;
+    })
+    .join("\n");
 
-  // Cross-analysis: severity per component (top 5)
-  const componentSeverity: Record<string, Record<string, number>> = {};
-  for (const comp of topComponents.slice(0, 5).map(([c]) => c)) {
-    componentSeverity[comp] = {};
-    for (const bug of bugs) {
-      if (bug.component === comp) {
-        const sev = bug.severity || "Unknown";
-        componentSeverity[comp][sev] = (componentSeverity[comp][sev] || 0) + 1;
-      }
-    }
-  }
+  const prompt = `You are a data analytics expert. Analyze this spreadsheet data and provide actionable insights.
 
-  const prompt = `You are a QA analytics expert. Analyze this bug report data and provide actionable insights for a client presentation.
+DATA SUMMARY (${agg.total} total rows, ${headers.length} columns):
+Columns: ${headers.join(", ")}
 
-DATA SUMMARY (${agg.total} total bugs):
-Severity: ${severityDist.map(([k, v]) => `${k}: ${v}`).join(", ")}
-Top Categories: ${topCategories.map(([k, v]) => `${k}: ${v}`).join(", ")}
-Top Components: ${topComponents.map(([k, v]) => `${k}: ${v}`).join(", ")}
-Platforms: ${platformDist.map(([k, v]) => `${k}: ${v}`).join(", ")}
-Reproducibility: ${reproDist.map(([k, v]) => `${k}: ${v}`).join(", ")}
-Severity by Component:
-${Object.entries(componentSeverity).map(([comp, sevs]) => `  ${comp}: ${Object.entries(sevs).map(([s, c]) => `${s}(${c})`).join(", ")}`).join("\n")}
+VALUE DISTRIBUTIONS:
+${columnSummaries}
 
 Provide analysis in markdown:
 ## 📊 Executive Summary
-## 🔥 Critical Risk Areas
-## 📈 Trend Analysis
+## 🔥 Key Findings
+## 📈 Pattern Analysis
 ## 🎯 Recommendations
-## 📋 Quality Score (1-10)
+## 📋 Data Quality Score (1-10)
 Be concise, data-driven, professional. Use actual numbers.`;
 
   return callAI(apiKey, provider, model, [{ role: "user", content: prompt }], { maxTokens: 1200 });
 }
 
 /**
- * RAG-like Q&A: Hybrid approach
- * - Always sends aggregated stats
- * - Smart-filters relevant rows based on question keywords
- * - Limits to max 30 rows to optimize tokens
+ * RAG-like Q&A: sends aggregated stats + keyword-filtered rows
  */
 export async function askAboutBugs(
   apiKey: string,
   provider: AIProvider,
   model: string,
   question: string,
-  agg: Aggregations,
-  bugs: BugRow[]
+  agg: DynamicAggregations,
+  bugs: RawRow[]
 ): Promise<string | null> {
-  const severityDist = Object.entries(agg.severityCounts).map(([k, v]) => `${k}: ${v}`).join(", ");
-  const topCategories = Object.entries(agg.categoryCounts).sort(([, a], [, b]) => b - a).slice(0, 10);
-  const topComponents = Object.entries(agg.componentCounts).sort(([, a], [, b]) => b - a).slice(0, 10);
+  const headers = bugs.length > 0 ? Object.keys(bugs[0]) : [];
+  
+  const columnSummaries = Object.entries(agg.columnCounts)
+    .slice(0, 10)
+    .map(([col, counts]) => {
+      const top = Object.entries(counts).sort(([, a], [, b]) => b - a).slice(0, 10);
+      return `${col}: ${top.map(([k, v]) => `${k}(${v})`).join(", ")}`;
+    })
+    .join("\n");
 
   // Smart filtering: find rows relevant to the question
   const qLower = question.toLowerCase();
-  const keywords = qLower.split(/\s+/).filter((w) => w.length > 2);
+  const keywords = qLower.split(/\s+/).filter(w => w.length > 2);
 
-  let relevantRows = bugs.filter((bug) => {
-    const text = `${bug.summary} ${bug.component} ${bug.category} ${bug.platform} ${bug.severity} ${bug.jiraId}`.toLowerCase();
-    return keywords.some((kw) => text.includes(kw));
+  let relevantRows = bugs.filter(row => {
+    const text = Object.values(row).join(" ").toLowerCase();
+    return keywords.some(kw => text.includes(kw));
   });
 
-  // If no keyword matches, take a diverse sample
-  if (relevantRows.length === 0) {
-    relevantRows = bugs.slice(0, 20);
-  }
+  if (relevantRows.length === 0) relevantRows = bugs.slice(0, 20);
 
-  // Limit to 30 rows, compact format
-  const sampleRows = relevantRows.slice(0, 30).map((b) => ({
-    id: b.jiraId,
-    s: b.summary?.slice(0, 80),
-    sev: b.severity,
-    comp: b.component,
-    cat: b.category,
-    plat: b.platform,
-    repro: b.reproducibility,
-  }));
+  // Compact format: only include first 5 columns per row
+  const compactHeaders = headers.slice(0, 6);
+  const sampleRows = relevantRows.slice(0, 30).map(r => {
+    const compact: Record<string, string> = {};
+    for (const h of compactHeaders) compact[h] = (r[h] || "").slice(0, 80);
+    return compact;
+  });
 
-  const prompt = `You are a QA data analyst. Answer the question using this bug data.
+  const prompt = `You are a data analyst. Answer using this data.
 
-STATS (${agg.total} bugs):
-- Severity: ${severityDist}
-- Categories: ${topCategories.map(([k, v]) => `${k}(${v})`).join(", ")}
-- Components: ${topComponents.map(([k, v]) => `${k}(${v})`).join(", ")}
-- Platforms: ${Object.entries(agg.platformCounts).map(([k, v]) => `${k}(${v})`).join(", ")}
-- Reproducibility: ${Object.entries(agg.reproducibilityCounts).map(([k, v]) => `${k}(${v})`).join(", ")}
+STATS (${agg.total} rows):
+${columnSummaries}
 
-RELEVANT BUGS (${relevantRows.length} of ${bugs.length} matched):
+RELEVANT ROWS (${relevantRows.length} of ${bugs.length} matched):
 ${JSON.stringify(sampleRows)}
 
 QUESTION: ${question}
 
-Answer concisely in markdown. Use actual data. If you can't fully answer from the data provided, say what's missing.`;
+Answer concisely in markdown. Use actual data.`;
 
   return callAI(apiKey, provider, model, [{ role: "user", content: prompt }], { maxTokens: 800 });
 }
