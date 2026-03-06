@@ -52,9 +52,25 @@ export function GoogleSheetsConnect({
           lastFetched: Date.now(),
         };
 
+        // If we already have an active sheet selected, only refresh that sheet
+        const alreadySelectedSheet = activeConfig?.sheetName;
+
         // With API key — use Sheets API
         if (googleApiKey) {
           const allSheets = await fetchAllGoogleSheets(parsed.sheetId, googleApiKey);
+
+          // If refreshing and we already picked a sheet, find and reload only that one
+          if (alreadySelectedSheet) {
+            const match = allSheets.find(s => s.name === alreadySelectedSheet);
+            if (match) {
+              config.sheetName = match.name;
+              setLastFetched(Date.now());
+              onSheetLoaded(match, config);
+              if (!silent) setLoading(false);
+              return;
+            }
+          }
+
           if (allSheets.length > 1) {
             setLastFetched(Date.now());
             onMultipleSheets(allSheets, config);
@@ -73,6 +89,19 @@ export function GoogleSheetsConnect({
         // Without API key — download entire workbook as xlsx to detect all sheets
         try {
           const sheets = await fetchPublicSpreadsheetAsWorkbook(parsed.sheetId);
+
+          // If refreshing and we already picked a sheet, find and reload only that one
+          if (alreadySelectedSheet) {
+            const match = sheets.find(s => s.name === alreadySelectedSheet);
+            if (match) {
+              config.sheetName = match.name;
+              setLastFetched(Date.now());
+              onSheetLoaded(match, config);
+              if (!silent) setLoading(false);
+              return;
+            }
+          }
+
           if (sheets.length > 1) {
             setLastFetched(Date.now());
             onMultipleSheets(sheets, config);
