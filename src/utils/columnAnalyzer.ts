@@ -1,53 +1,82 @@
 import type { RawRow, ColumnAnalysis, ColumnType, ChartSuggestion, DataAnalysis } from "@/types/bug";
 
 const URL_REGEX = /^https?:\/\//i;
-const DATE_REGEX = /^\d{1,4}[-\/]\d{1,2}[-\/]\d{1,4}$/;
+const DATE_REGEX = /^\d{1,4}[-\/\.]\d{1,2}[-\/\.]\d{1,4}(\s|T|$)/;
 const NUMBER_REGEX = /^-?\d+(\.\d+)?$/;
+const CURRENCY_REGEX = /^[\$€£₹¥]?\s*-?\d[\d,]*(\.\d+)?$/;
 
-// Keywords that suggest important/priority columns
+// Priority keywords for important columns
 const PRIORITY_KEYWORDS = [
   "severity", "priority", "status", "type", "category", "module",
   "component", "platform", "environment", "result", "pass", "fail",
   "critical", "high", "medium", "low", "p1", "p2", "p3",
+  "department", "region", "country", "state", "city",
+  "gender", "age group", "segment", "tier", "level", "grade", "rating",
+  "channel", "source", "method", "class", "group",
 ];
 
-const ID_KEYWORDS = ["id", "no", "number", "sl", "sr", "#", "ticket", "jira", "key"];
-const TEXT_KEYWORDS = ["description", "summary", "comment", "note", "step", "detail", "expected", "actual", "objective", "procedure", "precondition"];
+const ID_KEYWORDS = ["id", "no", "number", "sl", "sr", "#", "ticket", "jira", "key", "code", "index"];
+const TEXT_KEYWORDS = [
+  "description", "summary", "comment", "note", "step", "detail",
+  "expected", "actual", "objective", "procedure", "precondition",
+  "remarks", "feedback", "review", "body", "content", "message", "bio",
+  "address", "url", "link", "path", "email",
+];
 
 function detectColumnType(name: string, values: string[]): ColumnType {
-  const lowerName = name.toLowerCase();
+  const lowerName = name.toLowerCase().trim();
   const nonEmpty = values.filter(v => v && v.trim());
   
   if (nonEmpty.length === 0) return "text";
 
-  // Check name-based hints first
-  if (ID_KEYWORDS.some(k => lowerName.includes(k))) {
+  // Name-based hints
+  if (ID_KEYWORDS.some(k => lowerName === k || lowerName.endsWith(" " + k) || lowerName.startsWith(k + " ") || lowerName.endsWith("_" + k))) {
     const uniqueRatio = new Set(nonEmpty).size / nonEmpty.length;
-    if (uniqueRatio > 0.8) return "id";
+    if (uniqueRatio > 0.7) return "id";
   }
 
-  if (TEXT_KEYWORDS.some(k => lowerName.includes(k))) {
-    const avgLen = nonEmpty.reduce((s, v) => s + v.length, 0) / nonEmpty.length;
-    if (avgLen > 40) return "text";
+  if (lowerName.includes("email") || lowerName.includes("url") || lowerName.includes("link") || lowerName.includes("website")) {
+    return "url";
   }
 
-  // Check value patterns
-  const sample = nonEmpty.slice(0, 50);
+  if (lowerName.includes("date") || lowerName.includes("time") || lowerName.includes("created") || lowerName.includes("updated") || lowerName.includes("timestamp")) {
+    return "date";
+  }
+
+  // Value-based detection on sample
+  const sample = nonEmpty.slice(0, 80);
   
   if (sample.every(v => URL_REGEX.test(v))) return "url";
-  if (sample.filter(v => DATE_REGEX.test(v)).length > sample.length * 0.7) return "date";
-  if (sample.filter(v => NUMBER_REGEX.test(v)).length > sample.length * 0.7) return "numeric";
+  
+  const dateMatches = sample.filter(v => DATE_REGEX.test(v.trim())).length;
+  if (dateMatches > sample.length * 0.6) return "date";
+  
+  const numMatches = sample.filter(v => NUMBER_REGEX.test(v.trim()) || CURRENCY_REGEX.test(v.trim())).length;
+  if (numMatches > sample.length * 0.6) return "numeric";
 
-  // Categorical: limited unique values relative to total
+  // Check if text column
+  if (TEXT_KEYWORDS.some(k => lowerName.includes(k))) {
+    const avgLen = nonEmpty.reduce((s, v) => s + v.length, 0) / nonEmpty.length;
+    if (avgLen > 30) return "text";
+  }
+
+  // Categorical detection
   const uniqueCount = new Set(nonEmpty).size;
   const avgLen = nonEmpty.reduce((s, v) => s + v.length, 0) / nonEmpty.length;
   
-  if (uniqueCount <= 25 && avgLen < 50) return "categorical";
-  if (uniqueCount <= 50 && uniqueCount < nonEmpty.length * 0.3 && avgLen < 40) return "categorical";
+  // Strong categorical: very few unique values
+  if (uniqueCount <= 2 && nonEmpty.length >= 5) return "categorical";
+  if (uniqueCount <= 15 && avgLen < 60) return "categorical";
+  if (uniqueCount <= 30 && uniqueCount < nonEmpty.length * 0.15 && avgLen < 50) return "categorical";
+  if (uniqueCount <= 50 && uniqueCount < nonEmpty.length * 0.08 && avgLen < 40) return "categorical";
   
-  if (avgLen > 60) return "text";
+  // Long text
+  if (avgLen > 50) return "text";
   
-  return uniqueCount < nonEmpty.length * 0.5 ? "categorical" : "text";
+  // ID-like: high uniqueness
+  if (uniqueCount > nonEmpty.length * 0.8) return "id";
+  
+  return uniqueCount < nonEmpty.length * 0.4 ? "categorical" : "text";
 }
 
 export function analyzeColumns(rows: RawRow[]): DataAnalysis {
@@ -61,7 +90,6 @@ export function analyzeColumns(rows: RawRow[]): DataAnalysis {
     const nonEmpty = values.filter(v => v.trim());
     const type = detectColumnType(header, nonEmpty);
     
-    // Count values
     const counts: Record<string, number> = {};
     for (const v of nonEmpty) {
       const val = v.trim();
@@ -91,60 +119,65 @@ export function analyzeColumns(rows: RawRow[]): DataAnalysis {
 
 function generateChartSuggestions(columns: ColumnAnalysis[]): ChartSuggestion[] {
   const suggestions: ChartSuggestion[] = [];
-  const categoricals = columns.filter(c => c.type === "categorical" && c.fillRate > 30);
+  const categoricals = columns.filter(c => c.type === "categorical" && c.fillRate > 20 && c.uniqueCount >= 2);
 
-  // Sort by priority: columns with priority keywords first, then by unique count
+  // Sort: priority keywords first, then fewer unique values
   const sorted = [...categoricals].sort((a, b) => {
-    const aPriority = PRIORITY_KEYWORDS.some(k => a.name.toLowerCase().includes(k)) ? 1 : 0;
-    const bPriority = PRIORITY_KEYWORDS.some(k => b.name.toLowerCase().includes(k)) ? 1 : 0;
-    if (bPriority !== aPriority) return bPriority - aPriority;
-    return a.uniqueCount - b.uniqueCount; // fewer unique = better for charts
+    const aPri = PRIORITY_KEYWORDS.some(k => a.name.toLowerCase().includes(k)) ? 1 : 0;
+    const bPri = PRIORITY_KEYWORDS.some(k => b.name.toLowerCase().includes(k)) ? 1 : 0;
+    if (bPri !== aPri) return bPri - aPri;
+    return a.uniqueCount - b.uniqueCount;
   });
 
   let priority = 100;
 
-  for (const col of sorted) {
-    if (col.uniqueCount <= 6) {
-      suggestions.push({
-        type: "pie",
-        columns: [col.name],
-        title: `${col.name} Distribution`,
-        priority: priority--,
-      });
-    } else if (col.uniqueCount <= 15) {
-      suggestions.push({
-        type: "vbar",
-        columns: [col.name],
-        title: `${col.name} Breakdown`,
-        priority: priority--,
-      });
+  for (const col of sorted.slice(0, 6)) {
+    if (col.uniqueCount === 2) {
+      // Binary — pie is perfect
+      suggestions.push({ type: "pie", columns: [col.name], title: `${col.name} Distribution`, priority: priority-- });
+    } else if (col.uniqueCount <= 7) {
+      // Small set — donut/pie
+      suggestions.push({ type: "pie", columns: [col.name], title: `${col.name} Distribution`, priority: priority-- });
+    } else if (col.uniqueCount <= 12) {
+      // Medium — vertical bar
+      suggestions.push({ type: "vbar", columns: [col.name], title: `${col.name} Breakdown`, priority: priority-- });
     } else {
-      suggestions.push({
-        type: "hbar",
-        columns: [col.name],
-        title: `Top ${col.name}`,
-        priority: priority--,
-      });
+      // Larger — horizontal bar (better for long labels)
+      suggestions.push({ type: "hbar", columns: [col.name], title: `Top ${col.name}`, priority: priority-- });
     }
   }
 
-  // Cross-analysis: combine top 2 categorical columns as heatmap/stacked
+  // Cross-analysis charts: pick the best 2-3 categorical pairs
   if (sorted.length >= 2) {
-    const [col1, col2] = sorted;
-    if (col1.uniqueCount <= 10 && col2.uniqueCount <= 10) {
+    const small = sorted.filter(c => c.uniqueCount <= 10);
+    
+    if (small.length >= 2) {
       suggestions.push({
         type: "heatmap",
-        columns: [col1.name, col2.name],
-        title: `${col1.name} × ${col2.name}`,
+        columns: [small[0].name, small[1].name],
+        title: `${small[0].name} × ${small[1].name}`,
         priority: priority--,
       });
     }
-    if (sorted.length >= 3) {
-      const col3 = sorted[2];
+    
+    if (sorted.length >= 2) {
+      const [col1, col2] = sorted.slice(0, 2);
+      if (col1.uniqueCount <= 12 && col2.uniqueCount <= 8) {
+        suggestions.push({
+          type: "stacked_bar",
+          columns: [col1.name, col2.name],
+          title: `${col2.name} by ${col1.name}`,
+          priority: priority--,
+        });
+      }
+    }
+
+    // Third cross-chart if enough data
+    if (small.length >= 3) {
       suggestions.push({
         type: "stacked_bar",
-        columns: [col1.name, col3.name],
-        title: `${col3.name} by ${col1.name}`,
+        columns: [small[0].name, small[2].name],
+        title: `${small[2].name} by ${small[0].name}`,
         priority: priority--,
       });
     }
@@ -154,15 +187,14 @@ function generateChartSuggestions(columns: ColumnAnalysis[]): ChartSuggestion[] 
 }
 
 function pickKPIColumns(columns: ColumnAnalysis[]): string[] {
-  // Pick columns with few unique values and high fill rate — best for KPI breakdowns
   return columns
-    .filter(c => c.type === "categorical" && c.uniqueCount <= 8 && c.fillRate > 50)
+    .filter(c => c.type === "categorical" && c.uniqueCount >= 2 && c.uniqueCount <= 10 && c.fillRate > 40)
     .sort((a, b) => {
       const aPri = PRIORITY_KEYWORDS.some(k => a.name.toLowerCase().includes(k)) ? 100 : 0;
       const bPri = PRIORITY_KEYWORDS.some(k => b.name.toLowerCase().includes(k)) ? 100 : 0;
       return (bPri - aPri) || (a.uniqueCount - b.uniqueCount);
     })
-    .slice(0, 2)
+    .slice(0, 3)
     .map(c => c.name);
 }
 

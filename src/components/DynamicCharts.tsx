@@ -23,22 +23,28 @@ interface Props {
 
 export function DynamicCharts({ rows, analysis, agg }: Props) {
   const charts = useMemo(() => {
-    // Limit to top 8 charts
-    return analysis.chartSuggestions.slice(0, 8);
+    return analysis.chartSuggestions.slice(0, 10);
   }, [analysis]);
 
   const renderChart = (suggestion: ChartSuggestion, index: number) => {
     const colName = suggestion.columns[0];
-    const counts = agg.columnCounts[colName];
-    if (!counts || Object.keys(counts).length === 0) return null;
 
     switch (suggestion.type) {
-      case "pie":
+      case "pie": {
+        const counts = agg.columnCounts[colName];
+        if (!counts || Object.keys(counts).length === 0) return null;
         return <SeverityPieChart key={index} data={counts} title={suggestion.title} />;
-      case "vbar":
+      }
+      case "vbar": {
+        const counts = agg.columnCounts[colName];
+        if (!counts || Object.keys(counts).length === 0) return null;
         return <VBarChart key={index} data={counts} title={suggestion.title} color={CHART_COLORS[index % CHART_COLORS.length]} />;
-      case "hbar":
+      }
+      case "hbar": {
+        const counts = agg.columnCounts[colName];
+        if (!counts || Object.keys(counts).length === 0) return null;
         return <HBarChart key={index} data={counts} title={suggestion.title} color={CHART_COLORS[index % CHART_COLORS.length]} />;
+      }
       case "heatmap":
         if (suggestion.columns.length >= 2) {
           return <DynamicHeatmap key={index} rows={rows} col1={suggestion.columns[0]} col2={suggestion.columns[1]} title={suggestion.title} />;
@@ -54,9 +60,10 @@ export function DynamicCharts({ rows, analysis, agg }: Props) {
     }
   };
 
-  // Split into rows of 2-3
   const simpleCharts = charts.filter(c => c.type !== "heatmap" && c.type !== "stacked_bar");
   const crossCharts = charts.filter(c => c.type === "heatmap" || c.type === "stacked_bar");
+
+  if (charts.length === 0) return null;
 
   return (
     <div className="space-y-4">

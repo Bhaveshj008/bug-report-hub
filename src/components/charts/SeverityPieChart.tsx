@@ -5,60 +5,61 @@ interface SeverityPieChartProps {
   title?: string;
 }
 
-const SEVERITY_COLORS: Record<string, string> = {
-  Critical: "hsl(0, 72%, 51%)",
-  High: "hsl(25, 95%, 53%)",
-  Medium: "hsl(45, 93%, 47%)",
-  Low: "hsl(142, 71%, 45%)",
-};
-
-const DEFAULT_COLORS = [
+const COLORS = [
   "hsl(190, 80%, 42%)",
   "hsl(262, 60%, 55%)",
   "hsl(25, 95%, 53%)",
   "hsl(142, 71%, 45%)",
   "hsl(45, 93%, 47%)",
   "hsl(0, 72%, 51%)",
+  "hsl(330, 60%, 50%)",
+  "hsl(200, 70%, 50%)",
 ];
 
+const CustomTooltip = ({ active, payload }: any) => {
+  if (!active || !payload?.[0]) return null;
+  const { name, value, payload: p } = payload[0];
+  return (
+    <div className="rounded-lg border bg-card px-3 py-2 shadow-lg">
+      <p className="text-xs font-medium text-foreground">{name}</p>
+      <p className="text-sm font-bold text-foreground">{value} <span className="text-muted-foreground font-normal">({p.pct}%)</span></p>
+    </div>
+  );
+};
+
 export function SeverityPieChart({ data, title }: SeverityPieChartProps) {
-  const chartData = Object.entries(data).map(([name, value]) => ({ name, value }));
+  const total = Object.values(data).reduce((s, v) => s + v, 0);
+  const chartData = Object.entries(data)
+    .sort(([, a], [, b]) => b - a)
+    .map(([name, value]) => ({ name, value, pct: total > 0 ? Math.round((value / total) * 100) : 0 }));
 
   return (
-    <div className="rounded-lg border bg-card p-4 animate-fade-in">
-      <h3 className="mb-3 text-sm font-semibold text-foreground">{title || "Severity Distribution"}</h3>
+    <div className="rounded-xl border bg-card p-5 animate-fade-in">
+      <h3 className="mb-1 text-sm font-semibold text-foreground">{title || "Distribution"}</h3>
+      <p className="mb-3 text-[11px] text-muted-foreground">{chartData.length} categories · {total} total</p>
       <ResponsiveContainer width="100%" height={260}>
         <PieChart>
           <Pie
             data={chartData}
             cx="50%"
             cy="50%"
-            innerRadius={55}
-            outerRadius={90}
-            paddingAngle={3}
+            innerRadius={50}
+            outerRadius={85}
+            paddingAngle={2}
             dataKey="value"
             stroke="none"
+            animationBegin={0}
+            animationDuration={600}
           >
             {chartData.map((entry, i) => (
-              <Cell
-                key={entry.name}
-                fill={SEVERITY_COLORS[entry.name] || DEFAULT_COLORS[i % DEFAULT_COLORS.length]}
-              />
+              <Cell key={entry.name} fill={COLORS[i % COLORS.length]} />
             ))}
           </Pie>
-          <Tooltip
-            contentStyle={{
-              backgroundColor: "hsl(var(--card))",
-              border: "1px solid hsl(var(--border))",
-              borderRadius: "8px",
-              fontSize: "12px",
-              color: "hsl(var(--foreground))",
-            }}
-          />
+          <Tooltip content={<CustomTooltip />} />
           <Legend
             iconType="circle"
             iconSize={8}
-            wrapperStyle={{ fontSize: "12px", color: "hsl(var(--muted-foreground))" }}
+            formatter={(value: string) => <span className="text-xs text-foreground">{value}</span>}
           />
         </PieChart>
       </ResponsiveContainer>

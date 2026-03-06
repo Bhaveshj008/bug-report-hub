@@ -1,11 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
-  Link2, RefreshCw, Unplug, Loader2, Clock, ExternalLink, ChevronDown,
+  Link2, RefreshCw, Unplug, Loader2, Clock, ExternalLink,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { extractSheetId, fetchGoogleSheet, fetchAllGoogleSheets, fetchGoogleSheetList, type GoogleSheetMeta } from "@/utils/googleSheets";
+import {
+  extractSheetId, fetchGoogleSheet, fetchAllGoogleSheets,
+  fetchPublicSpreadsheetAsWorkbook,
+} from "@/utils/googleSheets";
 import type { SheetInfo } from "@/utils/excelParser";
 import type { GoogleSheetsConfig } from "@/types/bug";
 
@@ -49,21 +52,45 @@ export function GoogleSheetsConnect({
           lastFetched: Date.now(),
         };
 
-        // If API key available, try to get all sheets
-        if (googleApiKey && !parsed.gid) {
-          const sheetList = await fetchGoogleSheetList(parsed.sheetId, googleApiKey);
-          if (sheetList.length > 1) {
-            const allSheets = await fetchAllGoogleSheets(parsed.sheetId, googleApiKey);
-            if (allSheets.length > 1) {
-              setLastFetched(Date.now());
-              onMultipleSheets(allSheets, config);
-              if (!silent) setLoading(false);
-              return;
-            }
+        // With API key — use Sheets API
+        if (googleApiKey) {
+          const allSheets = await fetchAllGoogleSheets(parsed.sheetId, googleApiKey);
+          if (allSheets.length > 1) {
+            setLastFetched(Date.now());
+            onMultipleSheets(allSheets, config);
+            if (!silent) setLoading(false);
+            return;
+          }
+          if (allSheets.length === 1) {
+            config.sheetName = allSheets[0].name;
+            setLastFetched(Date.now());
+            onSheetLoaded(allSheets[0], config);
+            if (!silent) setLoading(false);
+            return;
           }
         }
 
-        // Single sheet or public
+        // Without API key — download entire workbook as xlsx to detect all sheets
+        try {
+          const sheets = await fetchPublicSpreadsheetAsWorkbook(parsed.sheetId);
+          if (sheets.length > 1) {
+            setLastFetched(Date.now());
+            onMultipleSheets(sheets, config);
+            if (!silent) setLoading(false);
+            return;
+          }
+          if (sheets.length === 1) {
+            config.sheetName = sheets[0].name;
+            setLastFetched(Date.now());
+            onSheetLoaded(sheets[0], config);
+            if (!silent) setLoading(false);
+            return;
+          }
+        } catch {
+          // Fallback to CSV method for single sheet
+        }
+
+        // Final fallback: fetch single sheet via CSV export
         const sheet = await fetchGoogleSheet(parsed.sheetId, parsed.gid, googleApiKey);
         config.sheetName = sheet.name;
         setLastFetched(Date.now());
@@ -155,9 +182,8 @@ export function GoogleSheetsConnect({
         <span className="text-sm font-semibold text-foreground">Connect Google Sheet</span>
       </div>
       <p className="text-xs text-muted-foreground">
-        Paste a Google Sheets URL. Sheet must be shared as "Anyone with the link"
-        {googleApiKey ? " or use your API key for private sheets." : "."}
-        {googleApiKey && " Multi-sheet workbooks will show a sheet selector."}
+        Paste a Google Sheets URL. Sheet must be shared as "Anyone with the link".
+        {" "}Multi-sheet workbooks will show a sheet selector.
       </p>
       <Input value={url} onChange={(e) => setUrl(e.target.value)}
         placeholder="https://docs.google.com/spreadsheets/d/..."
