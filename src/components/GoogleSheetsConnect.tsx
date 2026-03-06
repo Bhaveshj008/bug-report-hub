@@ -29,6 +29,7 @@ export function GoogleSheetsConnect({
   const [autoPoll, setAutoPoll] = useState((activeConfig?.pollInterval || 0) > 0);
   const [pollInterval, setPollInterval] = useState(activeConfig?.pollInterval || 30);
   const [lastFetched, setLastFetched] = useState<number | null>(activeConfig?.lastFetched || null);
+  const [availableSheets, setAvailableSheets] = useState<SheetInfo[]>([]);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchSheet = useCallback(
@@ -58,6 +59,7 @@ export function GoogleSheetsConnect({
         // With API key — use Sheets API
         if (googleApiKey) {
           const allSheets = await fetchAllGoogleSheets(parsed.sheetId, googleApiKey);
+          setAvailableSheets(allSheets);
 
           // If refreshing and we already picked a sheet, find and reload only that one
           if (alreadySelectedSheet) {
@@ -95,6 +97,7 @@ export function GoogleSheetsConnect({
         // Without API key — download entire workbook as xlsx to detect all sheets
         try {
           const sheets = await fetchPublicSpreadsheetAsWorkbook(parsed.sheetId);
+          setAvailableSheets(sheets);
 
           // If refreshing and we already picked a sheet, find and reload only that one
           if (alreadySelectedSheet) {
@@ -145,6 +148,35 @@ export function GoogleSheetsConnect({
   );
 
   useEffect(() => {
+    // Fetch available sheets when activeConfig is present
+    const loadAvailableSheets = async () => {
+      if (!activeConfig?.sheetId) return;
+
+      try {
+        // Try with API key first
+        if (googleApiKey) {
+          const allSheets = await fetchAllGoogleSheets(activeConfig.sheetId, googleApiKey);
+          setAvailableSheets(allSheets);
+          return;
+        }
+
+        // Fallback to public workbook fetch
+        try {
+          const sheets = await fetchPublicSpreadsheetAsWorkbook(activeConfig.sheetId);
+          setAvailableSheets(sheets);
+        } catch {
+          // If both fail, just set empty array
+          setAvailableSheets([]);
+        }
+      } catch {
+        setAvailableSheets([]);
+      }
+    };
+
+    loadAvailableSheets();
+  }, [activeConfig?.sheetId, googleApiKey]);
+
+  useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current);
     if (autoPoll && activeConfig && pollInterval > 0) {
       pollRef.current = setInterval(() => fetchSheet(true), pollInterval * 1000);
@@ -157,6 +189,25 @@ export function GoogleSheetsConnect({
     fetchSheet();
   };
 
+  const handleSwitchSheet = useCallback(async (sheetName: string) => {
+    const sheet = availableSheets.find(s => s.name === sheetName);
+    if (!sheet || !activeConfig) return;
+
+    setLoading(true);
+    try {
+      const config: GoogleSheetsConfig = {
+        ...activeConfig,
+        sheetName: sheet.name,
+        lastFetched: Date.now(),
+      };
+      setLastFetched(Date.now());
+      onSheetLoaded(sheet, config);
+    } catch (e: any) {
+      setError(e.message || "Failed to switch sheet");
+    }
+    setLoading(false);
+  }, [availableSheets, activeConfig, onSheetLoaded]);
+
   if (activeConfig) {
     return (
       <div className="rounded-lg border bg-card p-4 space-y-3 animate-fade-in">
@@ -164,8 +215,21 @@ export function GoogleSheetsConnect({
           <div className="flex items-center gap-2">
             <Link2 className="h-4 w-4 text-primary" />
             <span className="text-sm font-medium text-foreground">Google Sheets Connected</span>
-            {activeConfig.sheetName && (
-              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">{activeConfig.sheetName}</span>
+            {activeConfig.sheetName && availableSheets.length > 1 ? (
+              <select 
+                value={activeConfig.sheetName}
+                onChange={(e) => handleSwitchSheet(e.target.value)}
+                disabled={loading}
+                className="h-6 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-0.5 text-[10px] font-medium text-primary hover:bg-primary/20 disabled:opacity-50"
+              >
+                {availableSheets.map(sheet => (
+                  <option key={sheet.name} value={sheet.name}>{sheet.name}</option>
+                ))}
+              </select>
+            ) : (
+              activeConfig.sheetName && (
+                <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">{activeConfig.sheetName}</span>
+              )
             )}
             <span className="h-2 w-2 rounded-full bg-chart-low animate-pulse" />
           </div>
