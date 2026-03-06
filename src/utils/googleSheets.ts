@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
 import type { SheetInfo } from "./excelParser";
+import { parseWorkbook } from "./excelParser";
 
 export type GoogleSheetMeta = {
   sheetId: number;
@@ -19,37 +20,37 @@ export function extractSheetId(
 }
 
 /**
- * Fetch list of sheets (tabs) in a Google Spreadsheet
+ * Fetch list of sheets (tabs) in a Google Spreadsheet via API key
  */
 export async function fetchGoogleSheetList(
   spreadsheetId: string,
-  apiKey?: string
+  apiKey: string
 ): Promise<GoogleSheetMeta[]> {
-  if (apiKey) {
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?key=${apiKey}&fields=sheets.properties`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error("Failed to fetch sheet list. Check API key and sheet ID.");
-    const data = await res.json();
-    return (data.sheets || []).map((s: any) => ({
-      sheetId: s.properties.sheetId,
-      title: s.properties.title,
-      rowCount: s.properties.gridProperties?.rowCount || 0,
-      columnCount: s.properties.gridProperties?.columnCount || 0,
-    }));
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?key=${apiKey}&fields=sheets.properties`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Failed to fetch sheet list. Check API key and sheet ID.");
+  const data = await res.json();
+  return (data.sheets || []).map((s: any) => ({
+    sheetId: s.properties.sheetId,
+    title: s.properties.title,
+    rowCount: s.properties.gridProperties?.rowCount || 0,
+    columnCount: s.properties.gridProperties?.columnCount || 0,
+  }));
+}
+
+/**
+ * For public sheets without API key — download as xlsx to get ALL tabs
+ */
+export async function fetchPublicSpreadsheetAsWorkbook(
+  spreadsheetId: string
+): Promise<SheetInfo[]> {
+  const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=xlsx`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error("Failed to download spreadsheet. Make sure it's shared as 'Anyone with the link'.");
   }
-  
-  // For public sheets, try fetching metadata via HTML page
-  // We can only reliably get sheet names from the page
-  try {
-    const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit?usp=sharing`;
-    const res = await fetch(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&gid=0`, { method: 'HEAD' });
-    if (!res.ok) throw new Error("Sheet not accessible");
-  } catch {
-    // Fallback: can't list sheets for public without API key
-  }
-  
-  // For public sheets without API key, return empty — we'll fetch single sheet
-  return [];
+  const buffer = await res.arrayBuffer();
+  return parseWorkbook(buffer);
 }
 
 export async function fetchGoogleSheet(

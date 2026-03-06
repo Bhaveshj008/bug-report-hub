@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Search } from "lucide-react";
+import { Search, Filter, ArrowUpDown } from "lucide-react";
 import type { RawRow, DataAnalysis } from "@/types/bug";
 
 interface Props {
@@ -16,19 +16,19 @@ export function DynamicTable({ rows, analysis, onSelectRow }: Props) {
   const [page, setPage] = useState(0);
   const perPage = 25;
 
-  // Determine visible columns (skip very long text columns for table display)
+  // Show all columns except very long text — up to 10
   const visibleColumns = useMemo(() => {
     return analysis.columns
-      .filter(c => c.type !== "text" || c.name.toLowerCase().includes("summary") || c.name.toLowerCase().includes("title"))
-      .slice(0, 8)
+      .filter(c => c.type !== "text" || c.fillRate > 70)
+      .slice(0, 10)
       .map(c => c.name);
   }, [analysis]);
 
-  // Filterable columns (categorical only)
+  // Filterable columns
   const filterColumns = useMemo(() => {
     return analysis.columns
-      .filter(c => c.type === "categorical" && c.uniqueCount <= 20)
-      .slice(0, 4);
+      .filter(c => c.type === "categorical" && c.uniqueCount <= 25 && c.uniqueCount >= 2)
+      .slice(0, 5);
   }, [analysis]);
 
   const filterOptions = useMemo(() => {
@@ -41,33 +41,30 @@ export function DynamicTable({ rows, analysis, onSelectRow }: Props) {
 
   const filtered = useMemo(() => {
     let result = rows;
-
-    // Apply filters
     for (const [col, val] of Object.entries(filters)) {
       if (val) result = result.filter(r => r[col] === val);
     }
-
-    // Search across all visible columns
     if (search) {
       const q = search.toLowerCase();
       result = result.filter(r =>
         visibleColumns.some(col => (r[col] || "").toLowerCase().includes(q))
       );
     }
-
-    // Sort
     if (sortCol) {
       result = [...result].sort((a, b) => {
-        const cmp = (a[sortCol] || "").localeCompare(b[sortCol] || "");
-        return sortAsc ? cmp : -cmp;
+        const av = a[sortCol] || "", bv = b[sortCol] || "";
+        // Try numeric sort
+        const an = parseFloat(av), bn = parseFloat(bv);
+        if (!isNaN(an) && !isNaN(bn)) return sortAsc ? an - bn : bn - an;
+        return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
       });
     }
-
     return result;
   }, [rows, filters, search, sortCol, sortAsc, visibleColumns]);
 
   const totalPages = Math.ceil(filtered.length / perPage);
   const paged = filtered.slice(page * perPage, (page + 1) * perPage);
+  const activeFilters = Object.values(filters).filter(Boolean).length;
 
   const toggleSort = (col: string) => {
     if (sortCol === col) setSortAsc(!sortAsc);
@@ -75,15 +72,16 @@ export function DynamicTable({ rows, analysis, onSelectRow }: Props) {
   };
 
   return (
-    <div className="animate-fade-in rounded-lg border bg-card">
-      <div className="flex flex-wrap items-center gap-2 border-b p-3">
-        <div className="relative flex-1 min-w-[200px]">
+    <div className="animate-fade-in rounded-xl border bg-card overflow-hidden">
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3 bg-muted/20">
+        <div className="relative flex-1 min-w-[180px]">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <input
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(0); }}
-            placeholder="Search…"
-            className="h-9 w-full rounded-md border bg-background pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            placeholder="Search across all columns…"
+            className="h-9 w-full rounded-lg border bg-background pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/50"
           />
         </div>
         {filterColumns.map(col => (
@@ -91,27 +89,38 @@ export function DynamicTable({ rows, analysis, onSelectRow }: Props) {
             key={col.name}
             value={filters[col.name] || ""}
             onChange={(e) => { setFilters(f => ({ ...f, [col.name]: e.target.value })); setPage(0); }}
-            className="h-9 rounded-md border bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            className="h-9 rounded-lg border bg-background px-2.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring/50 max-w-[160px]"
           >
             <option value="">All {col.name}</option>
             {(filterOptions[col.name] || []).map(o => <option key={o} value={o}>{o}</option>)}
           </select>
         ))}
+        {activeFilters > 0 && (
+          <button onClick={() => setFilters({})} className="flex items-center gap-1 text-xs text-primary hover:underline">
+            <Filter className="h-3 w-3" /> Clear {activeFilters}
+          </button>
+        )}
       </div>
 
+      {/* Table */}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b text-left">
+            <tr className="border-b bg-muted/30">
+              <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider w-10">#</th>
               {visibleColumns.map(col => (
                 <th
                   key={col}
                   onClick={() => toggleSort(col)}
-                  className="cursor-pointer whitespace-nowrap px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+                  className="cursor-pointer whitespace-nowrap px-4 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors"
                 >
-                  <span className="flex items-center gap-1">
+                  <span className="inline-flex items-center gap-1">
                     {col}
-                    {sortCol === col && (sortAsc ? " ↑" : " ↓")}
+                    {sortCol === col ? (
+                      <span className="text-primary">{sortAsc ? "↑" : "↓"}</span>
+                    ) : (
+                      <ArrowUpDown className="h-3 w-3 opacity-30" />
+                    )}
                   </span>
                 </th>
               ))}
@@ -122,29 +131,43 @@ export function DynamicTable({ rows, analysis, onSelectRow }: Props) {
               <tr
                 key={i}
                 onClick={() => onSelectRow(row)}
-                className="cursor-pointer border-b transition-colors hover:bg-muted/50 last:border-0"
+                className="cursor-pointer border-b transition-colors hover:bg-primary/5 last:border-0"
               >
+                <td className="px-4 py-2.5 text-xs text-muted-foreground font-mono">{page * perPage + i + 1}</td>
                 {visibleColumns.map(col => (
-                  <td key={col} className="max-w-[250px] truncate whitespace-nowrap px-3 py-2 text-foreground">
-                    {row[col] || ""}
+                  <td key={col} className="max-w-[220px] truncate whitespace-nowrap px-4 py-2.5 text-foreground">
+                    {row[col] || <span className="text-muted-foreground/40">—</span>}
                   </td>
                 ))}
               </tr>
             ))}
+            {paged.length === 0 && (
+              <tr>
+                <td colSpan={visibleColumns.length + 1} className="px-4 py-8 text-center text-muted-foreground">
+                  No matching records found
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
 
+      {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between border-t px-3 py-2">
+        <div className="flex items-center justify-between border-t px-4 py-2.5 bg-muted/10">
           <span className="text-xs text-muted-foreground">
-            {filtered.length} results • Page {page + 1} of {totalPages}
+            Showing {page * perPage + 1}–{Math.min((page + 1) * perPage, filtered.length)} of {filtered.length}
           </span>
-          <div className="flex gap-1">
+          <div className="flex items-center gap-1">
+            <button onClick={() => setPage(0)} disabled={page === 0}
+              className="rounded-md border px-2 py-1 text-xs text-foreground disabled:opacity-30 hover:bg-muted">First</button>
             <button onClick={() => setPage(Math.max(0, page - 1))} disabled={page === 0}
-              className="rounded border px-2 py-1 text-xs text-foreground disabled:opacity-30 hover:bg-muted">Prev</button>
+              className="rounded-md border px-2.5 py-1 text-xs text-foreground disabled:opacity-30 hover:bg-muted">Prev</button>
+            <span className="px-2 text-xs font-medium text-foreground">{page + 1} / {totalPages}</span>
             <button onClick={() => setPage(Math.min(totalPages - 1, page + 1))} disabled={page >= totalPages - 1}
-              className="rounded border px-2 py-1 text-xs text-foreground disabled:opacity-30 hover:bg-muted">Next</button>
+              className="rounded-md border px-2.5 py-1 text-xs text-foreground disabled:opacity-30 hover:bg-muted">Next</button>
+            <button onClick={() => setPage(totalPages - 1)} disabled={page >= totalPages - 1}
+              className="rounded-md border px-2 py-1 text-xs text-foreground disabled:opacity-30 hover:bg-muted">Last</button>
           </div>
         </div>
       )}
