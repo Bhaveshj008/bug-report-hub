@@ -96,9 +96,11 @@ export default function Dashboard() {
   const handleSheetSelected = useCallback(async (sheet: SheetInfo) => {
     setPendingSheets(null);
     setIsLoading(true);
-    await loadSheet(sheet, pendingFileName);
+    // Add the selected sheet name to the config before saving
+    const updatedConfig = googleConfig ? { ...googleConfig, sheetName: sheet.name } : undefined;
+    await loadSheet(sheet, pendingFileName, updatedConfig);
     setIsLoading(false);
-  }, [pendingFileName, loadSheet]);
+  }, [pendingFileName, loadSheet, googleConfig]);
 
   const handleGoogleSheet = useCallback(async (sheet: SheetInfo, config: GoogleSheetsConfig) => {
     setIsLoading(true);
@@ -110,12 +112,23 @@ export default function Dashboard() {
     if (sheets.length === 1) {
       handleGoogleSheet(sheets[0], config);
     } else {
+      // If a sheet was already selected, find and auto-load it instead of showing dialog
+      if (googleConfig?.sheetName) {
+        const previousSheet = sheets.find(s => s.name === googleConfig.sheetName);
+        if (previousSheet) {
+          config.sheetName = googleConfig.sheetName;
+          handleGoogleSheet(previousSheet, config);
+          return;
+        }
+      }
+      
+      // Only show sheet selector if no sheet was previously selected
       setPendingSheets(sheets);
       setPendingFileName(`Google Sheet`);
       // Store config for when sheet is selected
       setGoogleConfig(config);
     }
-  }, [handleGoogleSheet]);
+  }, [handleGoogleSheet, googleConfig]);
 
   const handleClearCache = useCallback(async () => {
     await clearAllData();

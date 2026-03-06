@@ -69,6 +69,12 @@ export function GoogleSheetsConnect({
               if (!silent) setLoading(false);
               return;
             }
+            // If sheet not found but was previously selected, still load it silently
+            // User might have deleted/renamed sheet - don't interrupt with selector
+            if (silent) {
+              if (!silent) setLoading(false);
+              return;
+            }
           }
 
           if (allSheets.length > 1) {
@@ -97,6 +103,12 @@ export function GoogleSheetsConnect({
               config.sheetName = match.name;
               setLastFetched(Date.now());
               onSheetLoaded(match, config);
+              if (!silent) setLoading(false);
+              return;
+            }
+            // If sheet not found but was previously selected, still load it silently
+            // User might have deleted/renamed sheet - don't interrupt with selector
+            if (silent) {
               if (!silent) setLoading(false);
               return;
             }
