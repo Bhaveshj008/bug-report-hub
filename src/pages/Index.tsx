@@ -33,6 +33,7 @@ export default function Dashboard() {
   const [googleConfig, setGoogleConfig] = useState<GoogleSheetsConfig | null>(null);
   const [pendingSheets, setPendingSheets] = useState<SheetInfo[] | null>(null);
   const [pendingFileName, setPendingFileName] = useState("");
+  const [visibleKPIs, setVisibleKPIs] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     (async () => {
@@ -69,13 +70,34 @@ export default function Dashboard() {
     await savePreferences(newPrefs);
   }, []);
 
-  const loadSheet = useCallback(async (sheet: SheetInfo, fName: string, gConfig?: GoogleSheetsConfig) => {
-    setRows(sheet.sampleRows);
-    setFileName(fName);
+  const loadSheets = useCallback(async (sheets: SheetInfo[], fName: string, gConfig?: GoogleSheetsConfig) => {
+    // Merge rows from multiple sheets
+    const allRows: RawRow[] = [];
+    const sheetNames: string[] = [];
+    for (const sheet of sheets) {
+      // Add a __sheet column to identify source if multiple sheets
+      if (sheets.length > 1) {
+        for (const row of sheet.sampleRows) {
+          allRows.push({ ...row, __sheet: sheet.name });
+        }
+      } else {
+        allRows.push(...sheet.sampleRows);
+      }
+      sheetNames.push(sheet.name);
+    }
+
+    setRows(allRows);
+    const displayName = sheets.length > 1 ? `${fName} (${sheetNames.join(", ")})` : fName;
+    setFileName(displayName);
     const cfg = gConfig || googleConfig;
     if (cfg) setGoogleConfig(cfg);
-    await saveBugData(sheet.sampleRows, fName, undefined, cfg || undefined);
+    await saveBugData(allRows, displayName, undefined, cfg || undefined);
   }, [googleConfig]);
+
+  // Keep single-sheet compat
+  const loadSheet = useCallback(async (sheet: SheetInfo, fName: string, gConfig?: GoogleSheetsConfig) => {
+    return loadSheets([sheet], fName, gConfig);
+  }, [loadSheets]);
 
   const handleFile = useCallback(async (data: ArrayBuffer, fName: string) => {
     setIsLoading(true);
@@ -93,14 +115,14 @@ export default function Dashboard() {
     setIsLoading(false);
   }, [loadSheet]);
 
-  const handleSheetSelected = useCallback(async (sheet: SheetInfo) => {
+  const handleSheetsSelected = useCallback(async (selectedSheets: SheetInfo[]) => {
     setPendingSheets(null);
     setIsLoading(true);
-    // Add the selected sheet name to the config before saving
-    const updatedConfig = googleConfig ? { ...googleConfig, sheetName: sheet.name } : undefined;
-    await loadSheet(sheet, pendingFileName, updatedConfig);
+    const sheetName = selectedSheets.length === 1 ? selectedSheets[0].name : undefined;
+    const updatedConfig = googleConfig ? { ...googleConfig, sheetName } : undefined;
+    await loadSheets(selectedSheets, pendingFileName, updatedConfig);
     setIsLoading(false);
-  }, [pendingFileName, loadSheet, googleConfig]);
+  }, [pendingFileName, loadSheets, googleConfig]);
 
   const handleGoogleSheet = useCallback(async (sheet: SheetInfo, config: GoogleSheetsConfig) => {
     setIsLoading(true);
@@ -112,7 +134,6 @@ export default function Dashboard() {
     if (sheets.length === 1) {
       handleGoogleSheet(sheets[0], config);
     } else {
-      // If a sheet was already selected, find and auto-load it instead of showing dialog
       if (googleConfig?.sheetName) {
         const previousSheet = sheets.find(s => s.name === googleConfig.sheetName);
         if (previousSheet) {
@@ -121,11 +142,8 @@ export default function Dashboard() {
           return;
         }
       }
-      
-      // Only show sheet selector if no sheet was previously selected
       setPendingSheets(sheets);
       setPendingFileName(`Google Sheet`);
-      // Store config for when sheet is selected
       setGoogleConfig(config);
     }
   }, [handleGoogleSheet, googleConfig]);
@@ -164,7 +182,7 @@ export default function Dashboard() {
           <div className="flex items-center gap-2">
             {hasData && (
               <>
-                <ExportBar bugs={rows} fileName={fileName} />
+                <ExportBar bugs={rows} fileName={fileName} analysis={analysis} agg={agg} visibleKPIs={visibleKPIs} />
                 <label className="flex h-9 cursor-pointer items-center gap-1.5 rounded-md border bg-card px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted">
                   <UploadIcon className="h-3.5 w-3.5" />
                   New
@@ -238,7 +256,7 @@ export default function Dashboard() {
               />
             )}
 
-            <DynamicKPICards analysis={analysis} agg={agg} fileName={fileName} />
+            <DynamicKPICards analysis={analysis} agg={agg} fileName={fileName} onVisibleKPIsChange={setVisibleKPIs} />
             <DynamicCharts rows={rows} analysis={analysis} agg={agg} />
 
             {prefs.aiEnabled && activeKey && (
@@ -261,7 +279,7 @@ export default function Dashboard() {
 
       <DynamicDetailDrawer row={selectedRow} onClose={() => setSelectedRow(null)} />
       {pendingSheets && (
-        <SheetSelector sheets={pendingSheets} onSelect={handleSheetSelected} onCancel={() => setPendingSheets(null)} />
+        <SheetSelector sheets={pendingSheets} onSelect={handleSheetsSelected} onCancel={() => setPendingSheets(null)} />
       )}
       <SettingsModal open={showSettings} onClose={() => setShowSettings(false)} preferences={prefs} onSave={handleSavePrefs} />
     </div>
