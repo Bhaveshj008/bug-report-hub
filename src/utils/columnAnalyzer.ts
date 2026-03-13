@@ -90,10 +90,21 @@ export function analyzeColumns(rows: RawRow[]): DataAnalysis {
     const nonEmpty = values.filter(v => v.trim());
     const type = detectColumnType(header, nonEmpty);
     
-    const counts: Record<string, number> = {};
+    // Case-insensitive grouping for counts
+    const lowerCounts: Record<string, number> = {};
+    const casingMap: Record<string, Record<string, number>> = {};
     for (const v of nonEmpty) {
       const val = v.trim();
-      if (val) counts[val] = (counts[val] || 0) + 1;
+      if (!val) continue;
+      const lower = val.toLowerCase();
+      lowerCounts[lower] = (lowerCounts[lower] || 0) + 1;
+      if (!casingMap[lower]) casingMap[lower] = {};
+      casingMap[lower][val] = (casingMap[lower][val] || 0) + 1;
+    }
+    const counts: Record<string, number> = {};
+    for (const [lower, total] of Object.entries(lowerCounts)) {
+      const canonical = Object.entries(casingMap[lower]).sort(([, a], [, b]) => b - a)[0][0];
+      counts[canonical] = total;
     }
 
     const topValues = Object.entries(counts)
