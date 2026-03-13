@@ -40,12 +40,10 @@ export async function exportPDF(
     rows: RawRow[];
     visibleKPIs?: Set<number>;
     dataFileName?: string;
-    aiInsights?: string | null;
   }
 ) {
   const { jsPDF } = await import("jspdf");
-  const html2canvas = (await import("html2canvas")).default;
-  const { analysis, agg, rows, visibleKPIs, dataFileName, aiInsights } = options;
+  const { analysis, agg, rows, visibleKPIs, dataFileName } = options;
 
   const pdf = new jsPDF("p", "mm", "a4");
   const pageW = 210;
@@ -98,11 +96,13 @@ export async function exportPDF(
   pdf.setFont("helvetica", "bold");
   pdf.text("Executive Summary", margin, y);
   y += 8;
+
   pdf.setDrawColor(...colors.primary);
   pdf.setLineWidth(0.5);
   pdf.line(margin, y - 2, margin + 40, y - 2);
   y += 4;
 
+  // Summary stats boxes
   const boxW = (contentW - 8) / 3;
   const summaryItems = [
     { label: "Total Records", value: String(agg.total) },
@@ -197,161 +197,105 @@ export async function exportPDF(
     y += 28;
   }
 
-  // === CAPTURE DASHBOARD CHARTS ===
-  const chartContainer = document.querySelector("#dashboard-charts");
-  if (chartContainer) {
-    try {
-      checkPage(20);
-      pdf.setTextColor(...colors.dark);
-      pdf.setFontSize(14);
-      pdf.setFont("helvetica", "bold");
-      pdf.text("Visualizations", margin, y);
-      y += 8;
-      pdf.setDrawColor(...colors.primary);
-      pdf.setLineWidth(0.5);
-      pdf.line(margin, y - 2, margin + 35, y - 2);
-      y += 4;
+  // === COLUMN DISTRIBUTIONS ===
+  const categoricals = analysis.columns.filter(c => c.type === "categorical" && c.fillRate > 20);
 
-      // Capture each chart card individually
-      const chartCards = chartContainer.querySelectorAll("[data-chart-card]");
-      for (const card of Array.from(chartCards)) {
-        const canvas = await html2canvas(card as HTMLElement, {
-          backgroundColor: null,
-          scale: 2,
-          useCORS: true,
-          logging: false,
-        });
-        const imgData = canvas.toDataURL("image/png");
-        const imgW = contentW;
-        const imgH = (canvas.height / canvas.width) * imgW;
-
-        checkPage(imgH + 4);
-        pdf.addImage(imgData, "PNG", margin, y, imgW, imgH);
-        y += imgH + 6;
-      }
-    } catch (e) {
-      console.warn("Chart capture failed:", e);
-    }
-  }
-
-  // === COLUMN DISTRIBUTIONS (fallback if no chart capture) ===
-  if (!chartContainer) {
-    const categoricals = analysis.columns.filter(c => c.type === "categorical" && c.fillRate > 20);
-
-    if (categoricals.length > 0) {
-      checkPage(20);
-      pdf.setTextColor(...colors.dark);
-      pdf.setFontSize(14);
-      pdf.setFont("helvetica", "bold");
-      pdf.text("Data Distributions", margin, y);
-      y += 8;
-      pdf.setDrawColor(...colors.primary);
-      pdf.setLineWidth(0.5);
-      pdf.line(margin, y - 2, margin + 38, y - 2);
-      y += 6;
-
-      for (const col of categoricals.slice(0, 6)) {
-        const counts = agg.columnCounts[col.name];
-        if (!counts) continue;
-        const entries = Object.entries(counts).sort(([, a], [, b]) => b - a).slice(0, 8);
-        const colTotal = entries.reduce((s, [, v]) => s + v, 0);
-
-        checkPage(12 + entries.length * 7);
-
-        pdf.setFontSize(11);
-        pdf.setTextColor(...colors.dark);
-        pdf.setFont("helvetica", "bold");
-        pdf.text(col.name, margin, y);
-        pdf.setFontSize(8);
-        pdf.setTextColor(...colors.muted);
-        pdf.setFont("helvetica", "normal");
-        pdf.text(`${col.uniqueCount} unique · ${Math.round(col.fillRate)}% filled`, margin + pdf.getTextWidth(col.name) + 4, y);
-        y += 6;
-
-        for (const [value, count] of entries) {
-          const pct = Math.round((count / colTotal) * 100);
-          const barW = (pct / 100) * (contentW * 0.5);
-
-          pdf.setFillColor(...colors.light);
-          pdf.roundedRect(margin, y - 3, contentW, 6, 1, 1, "F");
-          pdf.setFillColor(...colors.primary);
-          pdf.roundedRect(margin, y - 3, Math.max(barW, 2), 6, 1, 1, "F");
-
-          pdf.setFontSize(8);
-          pdf.setTextColor(...colors.dark);
-          pdf.setFont("helvetica", "normal");
-          const label = value.length > 24 ? value.slice(0, 22) + "…" : value;
-          pdf.text(label, margin + contentW * 0.55, y + 1);
-          pdf.setTextColor(...colors.muted);
-          pdf.text(`${count} (${pct}%)`, margin + contentW * 0.85, y + 1);
-          y += 7;
-        }
-        y += 4;
-      }
-    }
-  }
-
-  // === AI INSIGHTS ===
-  if (aiInsights) {
-    checkPage(30);
+  if (categoricals.length > 0) {
+    checkPage(20);
     pdf.setTextColor(...colors.dark);
     pdf.setFontSize(14);
     pdf.setFont("helvetica", "bold");
-    pdf.text("AI-Powered Insights", margin, y);
+    pdf.text("Data Distributions", margin, y);
     y += 8;
-    pdf.setDrawColor(...colors.accent);
+    pdf.setDrawColor(...colors.primary);
     pdf.setLineWidth(0.5);
-    pdf.line(margin, y - 2, margin + 42, y - 2);
+    pdf.line(margin, y - 2, margin + 38, y - 2);
     y += 6;
 
-    // Strip markdown formatting for PDF
-    const plainText = aiInsights
-      .replace(/#{1,3}\s*/g, "")
-      .replace(/\*\*(.*?)\*\*/g, "$1")
-      .replace(/\*(.*?)\*/g, "$1")
-      .replace(/[📊🔥📈⚠️🎯📋✅❌💡🔍]/g, "")
-      .trim();
+    for (const col of categoricals.slice(0, 6)) {
+      const counts = agg.columnCounts[col.name];
+      if (!counts) continue;
+      const entries = Object.entries(counts).sort(([, a], [, b]) => b - a).slice(0, 8);
+      const colTotal = entries.reduce((s, [, v]) => s + v, 0);
 
-    const lines = plainText.split("\n").filter(l => l.trim());
-    
-    pdf.setFontSize(9);
-    pdf.setFont("helvetica", "normal");
+      checkPage(12 + entries.length * 7);
 
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
+      pdf.setFontSize(11);
+      pdf.setTextColor(...colors.dark);
+      pdf.setFont("helvetica", "bold");
+      pdf.text(col.name, margin, y);
+      pdf.setFontSize(8);
+      pdf.setTextColor(...colors.muted);
+      pdf.setFont("helvetica", "normal");
+      pdf.text(`${col.uniqueCount} unique · ${Math.round(col.fillRate)}% filled`, margin + pdf.getTextWidth(col.name) + 4, y);
+      y += 6;
 
-      // Detect section headers (lines that were ## headers)
-      const isHeader = trimmed.length < 60 && !trimmed.startsWith("-") && !trimmed.startsWith("•");
-      const isBullet = trimmed.startsWith("-") || trimmed.startsWith("•");
+      for (const [value, count] of entries) {
+        const pct = Math.round((count / colTotal) * 100);
+        const barW = (pct / 100) * (contentW * 0.5);
 
-      checkPage(8);
+        pdf.setFillColor(...colors.light);
+        pdf.roundedRect(margin, y - 3, contentW, 6, 1, 1, "F");
+        pdf.setFillColor(...colors.primary);
+        pdf.roundedRect(margin, y - 3, Math.max(barW, 2), 6, 1, 1, "F");
 
-      if (isHeader && !isBullet) {
-        y += 2;
-        pdf.setFontSize(10);
+        pdf.setFontSize(8);
         pdf.setTextColor(...colors.dark);
-        pdf.setFont("helvetica", "bold");
-        const headerText = trimmed.replace(/^[-•]\s*/, "");
-        pdf.text(headerText, margin, y);
-        y += 6;
-        pdf.setFontSize(9);
         pdf.setFont("helvetica", "normal");
-      } else {
-        pdf.setTextColor(...colors.text);
-        const indent = isBullet ? margin + 4 : margin;
-        const maxW = contentW - (isBullet ? 4 : 0);
-        const text = isBullet ? trimmed.replace(/^[-•]\s*/, "• ") : trimmed;
-        const splitLines = pdf.splitTextToSize(text, maxW);
-        for (const sl of splitLines) {
-          checkPage(5);
-          pdf.text(sl, indent, y);
-          y += 4.5;
-        }
-        y += 1;
+        const label = value.length > 24 ? value.slice(0, 22) + "…" : value;
+        pdf.text(label, margin + contentW * 0.55, y + 1);
+        pdf.setTextColor(...colors.muted);
+        pdf.text(`${count} (${pct}%)`, margin + contentW * 0.85, y + 1);
+        y += 7;
       }
+      y += 4;
     }
   }
+
+  // === DATA SAMPLE TABLE ===
+  checkPage(40);
+  pdf.setTextColor(...colors.dark);
+  pdf.setFontSize(14);
+  pdf.setFont("helvetica", "bold");
+  pdf.text("Data Sample", margin, y);
+  y += 8;
+  pdf.setDrawColor(...colors.accent);
+  pdf.setLineWidth(0.5);
+  pdf.line(margin, y - 2, margin + 28, y - 2);
+  y += 4;
+
+  const headers = rows.length > 0 ? Object.keys(rows[0]).slice(0, 6) : [];
+  const colW = contentW / Math.max(headers.length, 1);
+
+  // Table header
+  pdf.setFillColor(...colors.dark);
+  pdf.rect(margin, y, contentW, 7, "F");
+  pdf.setFontSize(7);
+  pdf.setTextColor(...colors.white);
+  pdf.setFont("helvetica", "bold");
+  headers.forEach((h, i) => {
+    const truncH = h.length > 14 ? h.slice(0, 12) + "…" : h;
+    pdf.text(truncH, margin + i * colW + 2, y + 5);
+  });
+  y += 7;
+
+  // Table rows
+  const sampleRows = rows.slice(0, 15);
+  sampleRows.forEach((row, ri) => {
+    checkPage(7);
+    if (ri % 2 === 0) {
+      pdf.setFillColor(...colors.light);
+      pdf.rect(margin, y, contentW, 6, "F");
+    }
+    pdf.setFontSize(7);
+    pdf.setTextColor(...colors.text);
+    pdf.setFont("helvetica", "normal");
+    headers.forEach((h, i) => {
+      const val = (row[h] || "").slice(0, 18);
+      pdf.text(val, margin + i * colW + 2, y + 4);
+    });
+    y += 6;
+  });
 
   // === FOOTER ===
   const totalPages = pdf.getNumberOfPages();
