@@ -203,27 +203,10 @@ export function dynamicAggregate(rows: RawRow[], analysis: DataAnalysis) {
   
   for (const col of analysis.columns) {
     if (col.type === "categorical") {
-      // Case-insensitive normalization: group values by lowercase key,
-      // but display using the most common casing
-      const lowerToCanonical: Record<string, string> = {};
-      const lowerCounts: Record<string, number> = {};
-      const casingCounts: Record<string, Record<string, number>> = {};
-
-      for (const row of rows) {
-        const raw = (row[col.name] || "").trim();
-        if (!raw) continue;
-        const lower = raw.toLowerCase();
-        lowerCounts[lower] = (lowerCounts[lower] || 0) + 1;
-        if (!casingCounts[lower]) casingCounts[lower] = {};
-        casingCounts[lower][raw] = (casingCounts[lower][raw] || 0) + 1;
-      }
-
-      // Pick the most common casing as canonical display name
       const counts: Record<string, number> = {};
-      for (const [lower, total] of Object.entries(lowerCounts)) {
-        const casings = casingCounts[lower];
-        const canonical = Object.entries(casings).sort(([, a], [, b]) => b - a)[0][0];
-        counts[canonical] = total;
+      for (const row of rows) {
+        const val = (row[col.name] || "").trim();
+        if (val) counts[val] = (counts[val] || 0) + 1;
       }
       columnCounts[col.name] = counts;
     }
