@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
-import { Bug, Trash2, Upload as UploadIcon, Settings, History } from "lucide-react";
+import { Bug, Trash2, Upload as UploadIcon, Settings } from "lucide-react";
 import { FileUpload } from "@/components/FileUpload";
 import { GoogleSheetsConnect } from "@/components/GoogleSheetsConnect";
 import { SheetSelector } from "@/components/SheetSelector";
@@ -11,7 +11,6 @@ import { SettingsModal } from "@/components/SettingsModal";
 import { AIInsightsPanel } from "@/components/AIInsightsPanel";
 import { ExportBar } from "@/components/ExportBar";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { InsightsSidebar } from "@/components/InsightsSidebar";
 import { parseWorkbook, type SheetInfo } from "@/utils/excelParser";
 import { analyzeColumns, dynamicAggregate } from "@/utils/columnAnalyzer";
 import { getActiveApiKey, getActiveModel } from "@/utils/aiProviders";
@@ -35,8 +34,6 @@ export default function Dashboard() {
   const [pendingSheets, setPendingSheets] = useState<SheetInfo[] | null>(null);
   const [pendingFileName, setPendingFileName] = useState("");
   const [visibleKPIs, setVisibleKPIs] = useState<Set<number>>(new Set());
-  const [aiInsights, setAiInsights] = useState<string | null>(null);
-  const [showInsightsSidebar, setShowInsightsSidebar] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -74,9 +71,11 @@ export default function Dashboard() {
   }, []);
 
   const loadSheets = useCallback(async (sheets: SheetInfo[], fName: string, gConfig?: GoogleSheetsConfig) => {
+    // Merge rows from multiple sheets
     const allRows: RawRow[] = [];
     const sheetNames: string[] = [];
     for (const sheet of sheets) {
+      // Add a __sheet column to identify source if multiple sheets
       if (sheets.length > 1) {
         for (const row of sheet.sampleRows) {
           allRows.push({ ...row, __sheet: sheet.name });
@@ -95,6 +94,7 @@ export default function Dashboard() {
     await saveBugData(allRows, displayName, undefined, cfg || undefined);
   }, [googleConfig]);
 
+  // Keep single-sheet compat
   const loadSheet = useCallback(async (sheet: SheetInfo, fName: string, gConfig?: GoogleSheetsConfig) => {
     return loadSheets([sheet], fName, gConfig);
   }, [loadSheets]);
@@ -153,7 +153,6 @@ export default function Dashboard() {
     setRows([]);
     setFileName("");
     setGoogleConfig(null);
-    setAiInsights(null);
   }, []);
 
   const handleDisconnectGoogle = useCallback(async () => {
@@ -163,6 +162,7 @@ export default function Dashboard() {
     setFileName("");
   }, []);
 
+  // Dynamic analysis
   const analysis = useMemo(() => analyzeColumns(rows), [rows]);
   const agg = useMemo(() => dynamicAggregate(rows, analysis), [rows, analysis]);
 
@@ -182,15 +182,7 @@ export default function Dashboard() {
           <div className="flex items-center gap-2">
             {hasData && (
               <>
-                <ExportBar bugs={rows} fileName={fileName} analysis={analysis} agg={agg} visibleKPIs={visibleKPIs} aiInsights={aiInsights} />
-                <button
-                  onClick={() => setShowInsightsSidebar(true)}
-                  className="flex h-9 items-center gap-1.5 rounded-md border bg-card px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted"
-                  title="View saved insights"
-                >
-                  <History className="h-3.5 w-3.5" />
-                  Insights
-                </button>
+                <ExportBar bugs={rows} fileName={fileName} analysis={analysis} agg={agg} visibleKPIs={visibleKPIs} />
                 <label className="flex h-9 cursor-pointer items-center gap-1.5 rounded-md border bg-card px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted">
                   <UploadIcon className="h-3.5 w-3.5" />
                   New
@@ -274,8 +266,6 @@ export default function Dashboard() {
                 model={getActiveModel(prefs)}
                 agg={agg}
                 bugs={rows}
-                fileName={fileName}
-                onInsightsGenerated={setAiInsights}
               />
             )}
 
@@ -292,7 +282,6 @@ export default function Dashboard() {
         <SheetSelector sheets={pendingSheets} onSelect={handleSheetsSelected} onCancel={() => setPendingSheets(null)} />
       )}
       <SettingsModal open={showSettings} onClose={() => setShowSettings(false)} preferences={prefs} onSave={handleSavePrefs} />
-      <InsightsSidebar open={showInsightsSidebar} onClose={() => setShowInsightsSidebar(false)} />
     </div>
   );
 }
