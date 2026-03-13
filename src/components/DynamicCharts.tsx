@@ -29,36 +29,30 @@ export function DynamicCharts({ rows, analysis, agg }: Props) {
   const renderChart = (suggestion: ChartSuggestion, index: number) => {
     const colName = suggestion.columns[0];
 
-    const wrapper = (child: React.ReactNode) => (
-      <div key={index} data-chart-card="">
-        {child}
-      </div>
-    );
-
     switch (suggestion.type) {
       case "pie": {
         const counts = agg.columnCounts[colName];
         if (!counts || Object.keys(counts).length === 0) return null;
-        return wrapper(<SeverityPieChart data={counts} title={suggestion.title} />);
+        return <SeverityPieChart key={index} data={counts} title={suggestion.title} />;
       }
       case "vbar": {
         const counts = agg.columnCounts[colName];
         if (!counts || Object.keys(counts).length === 0) return null;
-        return wrapper(<VBarChart data={counts} title={suggestion.title} color={CHART_COLORS[index % CHART_COLORS.length]} />);
+        return <VBarChart key={index} data={counts} title={suggestion.title} color={CHART_COLORS[index % CHART_COLORS.length]} />;
       }
       case "hbar": {
         const counts = agg.columnCounts[colName];
         if (!counts || Object.keys(counts).length === 0) return null;
-        return wrapper(<HBarChart data={counts} title={suggestion.title} color={CHART_COLORS[index % CHART_COLORS.length]} />);
+        return <HBarChart key={index} data={counts} title={suggestion.title} color={CHART_COLORS[index % CHART_COLORS.length]} />;
       }
       case "heatmap":
         if (suggestion.columns.length >= 2) {
-          return wrapper(<DynamicHeatmap rows={rows} col1={suggestion.columns[0]} col2={suggestion.columns[1]} title={suggestion.title} />);
+          return <DynamicHeatmap key={index} rows={rows} col1={suggestion.columns[0]} col2={suggestion.columns[1]} title={suggestion.title} />;
         }
         return null;
       case "stacked_bar":
         if (suggestion.columns.length >= 2) {
-          return wrapper(<DynamicStackedBar rows={rows} groupCol={suggestion.columns[0]} stackCol={suggestion.columns[1]} title={suggestion.title} />);
+          return <DynamicStackedBar key={index} rows={rows} groupCol={suggestion.columns[0]} stackCol={suggestion.columns[1]} title={suggestion.title} />;
         }
         return null;
       default:
