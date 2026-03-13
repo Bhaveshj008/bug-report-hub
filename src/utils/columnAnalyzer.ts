@@ -61,7 +61,7 @@ function detectColumnType(name: string, values: string[]): ColumnType {
   }
 
   // Categorical detection
-  const uniqueCount = new Set(nonEmpty).size;
+  const uniqueCount = new Set(nonEmpty.map(v => v.toLowerCase().trim())).size;
   const avgLen = nonEmpty.reduce((s, v) => s + v.length, 0) / nonEmpty.length;
   
   // Strong categorical: very few unique values
@@ -90,10 +90,21 @@ export function analyzeColumns(rows: RawRow[]): DataAnalysis {
     const nonEmpty = values.filter(v => v.trim());
     const type = detectColumnType(header, nonEmpty);
     
-    const counts: Record<string, number> = {};
+    // Case-insensitive grouping for counts
+    const lowerCounts: Record<string, number> = {};
+    const casingMap: Record<string, Record<string, number>> = {};
     for (const v of nonEmpty) {
       const val = v.trim();
-      if (val) counts[val] = (counts[val] || 0) + 1;
+      if (!val) continue;
+      const lower = val.toLowerCase();
+      lowerCounts[lower] = (lowerCounts[lower] || 0) + 1;
+      if (!casingMap[lower]) casingMap[lower] = {};
+      casingMap[lower][val] = (casingMap[lower][val] || 0) + 1;
+    }
+    const counts: Record<string, number> = {};
+    for (const [lower, total] of Object.entries(lowerCounts)) {
+      const canonical = Object.entries(casingMap[lower]).sort(([, a], [, b]) => b - a)[0][0];
+      counts[canonical] = total;
     }
 
     const topValues = Object.entries(counts)
@@ -104,7 +115,7 @@ export function analyzeColumns(rows: RawRow[]): DataAnalysis {
     columns.push({
       name: header,
       type,
-      uniqueCount: new Set(nonEmpty).size,
+      uniqueCount: new Set(nonEmpty.map(v => v.toLowerCase().trim())).size,
       totalCount: nonEmpty.length,
       topValues,
       fillRate: rows.length > 0 ? (nonEmpty.length / rows.length) * 100 : 0,
@@ -203,10 +214,27 @@ export function dynamicAggregate(rows: RawRow[], analysis: DataAnalysis) {
   
   for (const col of analysis.columns) {
     if (col.type === "categorical") {
-      const counts: Record<string, number> = {};
+      // Case-insensitive normalization: group values by lowercase key,
+      // but display using the most common casing
+      const lowerToCanonical: Record<string, string> = {};
+      const lowerCounts: Record<string, number> = {};
+      const casingCounts: Record<string, Record<string, number>> = {};
+
       for (const row of rows) {
-        const val = (row[col.name] || "").trim();
-        if (val) counts[val] = (counts[val] || 0) + 1;
+        const raw = (row[col.name] || "").trim();
+        if (!raw) continue;
+        const lower = raw.toLowerCase();
+        lowerCounts[lower] = (lowerCounts[lower] || 0) + 1;
+        if (!casingCounts[lower]) casingCounts[lower] = {};
+        casingCounts[lower][raw] = (casingCounts[lower][raw] || 0) + 1;
+      }
+
+      // Pick the most common casing as canonical display name
+      const counts: Record<string, number> = {};
+      for (const [lower, total] of Object.entries(lowerCounts)) {
+        const casings = casingCounts[lower];
+        const canonical = Object.entries(casings).sort(([, a], [, b]) => b - a)[0][0];
+        counts[canonical] = total;
       }
       columnCounts[col.name] = counts;
     }
