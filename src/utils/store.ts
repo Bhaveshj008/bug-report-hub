@@ -1,23 +1,14 @@
 import { openDB, type DBSchema } from "idb";
 import type { RawRow, TemplateFingerprint, UserPreferences, GoogleSheetsConfig, DataFormat } from "@/types/bug";
 
-export interface SavedInsight {
-  id: string;
-  content: string;
-  fileName: string;
-  timestamp: number;
-  rowCount: number;
-}
-
 interface BugDashDB extends DBSchema {
   bugs: { key: string; value: { id: string; rows: RawRow[]; fileName: string; timestamp: number; dataFormat?: DataFormat; googleConfig?: GoogleSheetsConfig } };
   templates: { key: string; value: TemplateFingerprint };
   preferences: { key: string; value: UserPreferences };
-  insights: { key: string; value: SavedInsight };
 }
 
 const DB_NAME = "bug-dashboard";
-const DB_VERSION = 2;
+const DB_VERSION = 1;
 
 function getDB() {
   return openDB<BugDashDB>(DB_NAME, DB_VERSION, {
@@ -25,7 +16,6 @@ function getDB() {
       if (!db.objectStoreNames.contains("bugs")) db.createObjectStore("bugs");
       if (!db.objectStoreNames.contains("templates")) db.createObjectStore("templates");
       if (!db.objectStoreNames.contains("preferences")) db.createObjectStore("preferences");
-      if (!db.objectStoreNames.contains("insights")) db.createObjectStore("insights");
     },
   });
 }
@@ -38,22 +28,6 @@ export async function saveBugData(rows: RawRow[], fileName: string, dataFormat?:
 export async function loadBugData(): Promise<{ rows: RawRow[]; fileName: string; timestamp: number; dataFormat?: DataFormat; googleConfig?: GoogleSheetsConfig } | undefined> {
   const db = await getDB();
   return db.get("bugs", "latest");
-}
-
-export async function saveInsight(insight: SavedInsight) {
-  const db = await getDB();
-  await db.put("insights", insight, insight.id);
-}
-
-export async function loadAllInsights(): Promise<SavedInsight[]> {
-  const db = await getDB();
-  const all = await db.getAll("insights");
-  return all.sort((a, b) => b.timestamp - a.timestamp);
-}
-
-export async function deleteInsight(id: string) {
-  const db = await getDB();
-  await db.delete("insights", id);
 }
 
 export async function saveTemplate(fp: TemplateFingerprint) {
