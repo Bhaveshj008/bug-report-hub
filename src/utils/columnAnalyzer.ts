@@ -61,7 +61,7 @@ function detectColumnType(name: string, values: string[]): ColumnType {
   }
 
   // Categorical detection
-  const uniqueCount = new Set(nonEmpty).size;
+  const uniqueCount = new Set(nonEmpty.map(v => v.toLowerCase().trim())).size;
   const avgLen = nonEmpty.reduce((s, v) => s + v.length, 0) / nonEmpty.length;
   
   // Strong categorical: very few unique values
