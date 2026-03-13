@@ -72,7 +72,7 @@ export function DynamicCharts({ rows, analysis, agg }: Props) {
   if (charts.length === 0) return null;
 
   return (
-    <div id="dashboard-charts" className="space-y-4">
+    <div className="space-y-4">
       {simpleCharts.length > 0 && (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {simpleCharts.map((chart, i) => renderChart(chart, i))}
