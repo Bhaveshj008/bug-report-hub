@@ -115,7 +115,7 @@ export function analyzeColumns(rows: RawRow[]): DataAnalysis {
     columns.push({
       name: header,
       type,
-      uniqueCount: new Set(nonEmpty.map(v => v.toLowerCase().trim())).size,
+      uniqueCount: new Set(nonEmpty).size,
       totalCount: nonEmpty.length,
       topValues,
       fillRate: rows.length > 0 ? (nonEmpty.length / rows.length) * 100 : 0,
