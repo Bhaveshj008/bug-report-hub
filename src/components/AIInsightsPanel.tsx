@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Sparkles, Send, Loader2, RefreshCw, MessageSquare, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { generateInsights, askAboutBugs } from "@/utils/aiInsights";
@@ -10,9 +10,10 @@ interface AIInsightsPanelProps {
   model: string;
   agg: DynamicAggregations;
   bugs: RawRow[];
+  onInsightsGenerated?: (insights: string) => void;
 }
 
-export function AIInsightsPanel({ apiKey, provider, model, agg, bugs }: AIInsightsPanelProps) {
+export function AIInsightsPanel({ apiKey, provider, model, agg, bugs, onInsightsGenerated }: AIInsightsPanelProps) {
   const [insights, setInsights] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -26,13 +27,17 @@ export function AIInsightsPanel({ apiKey, provider, model, agg, bugs }: AIInsigh
     setError(null);
     try {
       const result = await generateInsights(apiKey, provider, model, agg, bugs);
-      if (result) setInsights(result);
-      else setError("Failed to generate insights. Check your API key.");
+      if (result) {
+        setInsights(result);
+        onInsightsGenerated?.(result);
+      } else {
+        setError("Failed to generate insights. Check your API key.");
+      }
     } catch {
       setError("Failed to connect to AI provider.");
     }
     setLoading(false);
-  }, [apiKey, provider, model, agg, bugs]);
+  }, [apiKey, provider, model, agg, bugs, onInsightsGenerated]);
 
   const handleAsk = useCallback(async () => {
     if (!question.trim()) return;

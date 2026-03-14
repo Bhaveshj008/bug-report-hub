@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
-import { Bug, Trash2, Upload as UploadIcon, Settings } from "lucide-react";
+import { Bug, Trash2, Upload as UploadIcon, Settings, History } from "lucide-react";
 import { FileUpload } from "@/components/FileUpload";
 import { GoogleSheetsConnect } from "@/components/GoogleSheetsConnect";
 import { SheetSelector } from "@/components/SheetSelector";
@@ -11,12 +11,14 @@ import { SettingsModal } from "@/components/SettingsModal";
 import { AIInsightsPanel } from "@/components/AIInsightsPanel";
 import { ExportBar } from "@/components/ExportBar";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { InsightsSidebar } from "@/components/InsightsSidebar";
 import { parseWorkbook, type SheetInfo } from "@/utils/excelParser";
 import { analyzeColumns, dynamicAggregate } from "@/utils/columnAnalyzer";
 import { getActiveApiKey, getActiveModel } from "@/utils/aiProviders";
 import {
   saveBugData, loadBugData,
   savePreferences, loadPreferences, clearAllData,
+  saveAnalysisRecord, type AnalysisRecord,
 } from "@/utils/store";
 import type { RawRow, UserPreferences, GoogleSheetsConfig } from "@/types/bug";
 
@@ -34,6 +36,8 @@ export default function Dashboard() {
   const [pendingSheets, setPendingSheets] = useState<SheetInfo[] | null>(null);
   const [pendingFileName, setPendingFileName] = useState("");
   const [visibleKPIs, setVisibleKPIs] = useState<Set<number>>(new Set());
+  const [showSidebar, setShowSidebar] = useState(false);
+  const [latestInsights, setLatestInsights] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -71,11 +75,9 @@ export default function Dashboard() {
   }, []);
 
   const loadSheets = useCallback(async (sheets: SheetInfo[], fName: string, gConfig?: GoogleSheetsConfig) => {
-    // Merge rows from multiple sheets
     const allRows: RawRow[] = [];
     const sheetNames: string[] = [];
     for (const sheet of sheets) {
-      // Add a __sheet column to identify source if multiple sheets
       if (sheets.length > 1) {
         for (const row of sheet.sampleRows) {
           allRows.push({ ...row, __sheet: sheet.name });
@@ -92,9 +94,19 @@ export default function Dashboard() {
     const cfg = gConfig || googleConfig;
     if (cfg) setGoogleConfig(cfg);
     await saveBugData(allRows, displayName, undefined, cfg || undefined);
+
+    // Save to analysis history
+    const record: AnalysisRecord = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      fileName: displayName,
+      timestamp: Date.now(),
+      rowCount: allRows.length,
+      columnCount: allRows.length > 0 ? Object.keys(allRows[0]).length : 0,
+      hasInsights: false,
+    };
+    await saveAnalysisRecord(record);
   }, [googleConfig]);
 
-  // Keep single-sheet compat
   const loadSheet = useCallback(async (sheet: SheetInfo, fName: string, gConfig?: GoogleSheetsConfig) => {
     return loadSheets([sheet], fName, gConfig);
   }, [loadSheets]);
@@ -153,6 +165,7 @@ export default function Dashboard() {
     setRows([]);
     setFileName("");
     setGoogleConfig(null);
+    setLatestInsights(null);
   }, []);
 
   const handleDisconnectGoogle = useCallback(async () => {
@@ -162,7 +175,21 @@ export default function Dashboard() {
     setFileName("");
   }, []);
 
-  // Dynamic analysis
+  const handleInsightsGenerated = useCallback(async (insights: string) => {
+    setLatestInsights(insights);
+    // Update the latest history record with insights
+    const record: AnalysisRecord = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      fileName,
+      timestamp: Date.now(),
+      rowCount: rows.length,
+      columnCount: rows.length > 0 ? Object.keys(rows[0]).length : 0,
+      hasInsights: true,
+      insights,
+    };
+    await saveAnalysisRecord(record);
+  }, [fileName, rows]);
+
   const analysis = useMemo(() => analyzeColumns(rows), [rows]);
   const agg = useMemo(() => dynamicAggregate(rows, analysis), [rows, analysis]);
 
@@ -182,7 +209,15 @@ export default function Dashboard() {
           <div className="flex items-center gap-2">
             {hasData && (
               <>
-                <ExportBar bugs={rows} fileName={fileName} analysis={analysis} agg={agg} visibleKPIs={visibleKPIs} />
+                <ExportBar bugs={rows} fileName={fileName} analysis={analysis} agg={agg} visibleKPIs={visibleKPIs} aiInsights={latestInsights} />
+                <button
+                  onClick={() => setShowSidebar(true)}
+                  className="flex h-9 items-center gap-1.5 rounded-md border bg-card px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+                  title="Analysis History"
+                >
+                  <History className="h-3.5 w-3.5" />
+                  History
+                </button>
                 <label className="flex h-9 cursor-pointer items-center gap-1.5 rounded-md border bg-card px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted">
                   <UploadIcon className="h-3.5 w-3.5" />
                   New
@@ -243,6 +278,16 @@ export default function Dashboard() {
                 onDisconnect={() => {}}
               />
             </div>
+            {/* Show history button even without data */}
+            <div className="mt-6 text-center">
+              <button
+                onClick={() => setShowSidebar(true)}
+                className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <History className="h-3.5 w-3.5" />
+                View Analysis History
+              </button>
+            </div>
           </div>
         ) : (
           <div id="dashboard-content" className="space-y-6">
@@ -266,6 +311,7 @@ export default function Dashboard() {
                 model={getActiveModel(prefs)}
                 agg={agg}
                 bugs={rows}
+                onInsightsGenerated={handleInsightsGenerated}
               />
             )}
 
@@ -282,6 +328,7 @@ export default function Dashboard() {
         <SheetSelector sheets={pendingSheets} onSelect={handleSheetsSelected} onCancel={() => setPendingSheets(null)} />
       )}
       <SettingsModal open={showSettings} onClose={() => setShowSettings(false)} preferences={prefs} onSave={handleSavePrefs} />
+      <InsightsSidebar open={showSidebar} onClose={() => setShowSidebar(false)} />
     </div>
   );
 }

@@ -8,9 +8,10 @@ interface ExportBarProps {
   analysis: DataAnalysis;
   agg: DynamicAggregations;
   visibleKPIs?: Set<number>;
+  aiInsights?: string | null;
 }
 
-export function ExportBar({ bugs, fileName, analysis, agg, visibleKPIs }: ExportBarProps) {
+export function ExportBar({ bugs, fileName, analysis, agg, visibleKPIs, aiInsights }: ExportBarProps) {
   const baseName = fileName.replace(/\.(xlsx|xls|csv)$/i, "").replace(/[^a-zA-Z0-9\s-]/g, "").trim() || "export";
 
   return (
@@ -23,7 +24,7 @@ export function ExportBar({ bugs, fileName, analysis, agg, visibleKPIs }: Export
         CSV
       </button>
       <button
-        onClick={() => exportPDF(`${baseName}-report.pdf`, { analysis, agg, rows: bugs, visibleKPIs, dataFileName: fileName })}
+        onClick={() => exportPDF(`${baseName}-report.pdf`, { analysis, agg, rows: bugs, visibleKPIs, dataFileName: fileName, aiInsights })}
         className="flex h-9 items-center gap-1.5 rounded-md border bg-card px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted"
       >
         <FileText className="h-3.5 w-3.5" />
