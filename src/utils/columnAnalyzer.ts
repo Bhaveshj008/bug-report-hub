@@ -203,11 +203,52 @@ export function dynamicAggregate(rows: RawRow[], analysis: DataAnalysis) {
   
   for (const col of analysis.columns) {
     if (col.type === "categorical") {
-      const counts: Record<string, number> = {};
+      // Case-insensitive + spelling-tolerant normalization
+      // Group by lowercase, pick the most frequent casing as canonical display name
+      const lowerToCanonical: Record<string, string> = {};
+      const lowerCounts: Record<string, number> = {};
+      const casingCounts: Record<string, Record<string, number>> = {};
+
       for (const row of rows) {
-        const val = (row[col.name] || "").trim();
-        if (val) counts[val] = (counts[val] || 0) + 1;
+        const raw = (row[col.name] || "").trim();
+        if (!raw) continue;
+        const lower = raw.toLowerCase();
+        lowerCounts[lower] = (lowerCounts[lower] || 0) + 1;
+        if (!casingCounts[lower]) casingCounts[lower] = {};
+        casingCounts[lower][raw] = (casingCounts[lower][raw] || 0) + 1;
       }
+
+      // Pick the most common casing as canonical display name
+      const counts: Record<string, number> = {};
+      for (const [lower, total] of Object.entries(lowerCounts)) {
+        const casings = casingCounts[lower];
+        const canonical = Object.entries(casings).sort(([, a], [, b]) => b - a)[0][0];
+        counts[canonical] = total;
+      }
+
+      // Fuzzy merge: merge values that differ by 1-2 chars (typo tolerance)
+      const keys = Object.keys(counts);
+      const merged = new Set<string>();
+      for (let i = 0; i < keys.length; i++) {
+        if (merged.has(keys[i])) continue;
+        for (let j = i + 1; j < keys.length; j++) {
+          if (merged.has(keys[j])) continue;
+          if (areSimilar(keys[i].toLowerCase(), keys[j].toLowerCase())) {
+            // Merge j into i (keep the one with higher count)
+            if (counts[keys[i]] >= counts[keys[j]]) {
+              counts[keys[i]] += counts[keys[j]];
+              delete counts[keys[j]];
+              merged.add(keys[j]);
+            } else {
+              counts[keys[j]] += counts[keys[i]];
+              delete counts[keys[i]];
+              merged.add(keys[i]);
+              break;
+            }
+          }
+        }
+      }
+
       columnCounts[col.name] = counts;
     }
   }
