@@ -33,26 +33,46 @@ export function DynamicCharts({ rows, analysis, agg }: Props) {
       case "pie": {
         const counts = agg.columnCounts[colName];
         if (!counts || Object.keys(counts).length === 0) return null;
-        return <SeverityPieChart key={index} data={counts} title={suggestion.title} />;
+        return (
+          <div key={index} data-chart-card>
+            <SeverityPieChart data={counts} title={suggestion.title} />
+          </div>
+        );
       }
       case "vbar": {
         const counts = agg.columnCounts[colName];
         if (!counts || Object.keys(counts).length === 0) return null;
-        return <VBarChart key={index} data={counts} title={suggestion.title} color={CHART_COLORS[index % CHART_COLORS.length]} />;
+        return (
+          <div key={index} data-chart-card>
+            <VBarChart data={counts} title={suggestion.title} color={CHART_COLORS[index % CHART_COLORS.length]} />
+          </div>
+        );
       }
       case "hbar": {
         const counts = agg.columnCounts[colName];
         if (!counts || Object.keys(counts).length === 0) return null;
-        return <HBarChart key={index} data={counts} title={suggestion.title} color={CHART_COLORS[index % CHART_COLORS.length]} />;
+        return (
+          <div key={index} data-chart-card>
+            <HBarChart data={counts} title={suggestion.title} color={CHART_COLORS[index % CHART_COLORS.length]} />
+          </div>
+        );
       }
       case "heatmap":
         if (suggestion.columns.length >= 2) {
-          return <DynamicHeatmap key={index} rows={rows} col1={suggestion.columns[0]} col2={suggestion.columns[1]} title={suggestion.title} />;
+          return (
+            <div key={index} data-chart-card>
+              <DynamicHeatmap rows={rows} col1={suggestion.columns[0]} col2={suggestion.columns[1]} title={suggestion.title} />
+            </div>
+          );
         }
         return null;
       case "stacked_bar":
         if (suggestion.columns.length >= 2) {
-          return <DynamicStackedBar key={index} rows={rows} groupCol={suggestion.columns[0]} stackCol={suggestion.columns[1]} title={suggestion.title} />;
+          return (
+            <div key={index} data-chart-card>
+              <DynamicStackedBar rows={rows} groupCol={suggestion.columns[0]} stackCol={suggestion.columns[1]} title={suggestion.title} />
+            </div>
+          );
         }
         return null;
       default:

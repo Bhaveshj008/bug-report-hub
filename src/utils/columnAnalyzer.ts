@@ -198,16 +198,86 @@ function pickKPIColumns(columns: ColumnAnalysis[]): string[] {
     .map(c => c.name);
 }
 
+/**
+ * Levenshtein distance check — returns true if strings differ by at most 2 chars
+ * and are at least 4 chars long (to avoid merging short distinct values)
+ */
+function areSimilar(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (a.length < 4 || b.length < 4) return false;
+  if (Math.abs(a.length - b.length) > 2) return false;
+
+  const maxLen = Math.max(a.length, b.length);
+  let dist = 0;
+  const matrix: number[][] = [];
+  for (let i = 0; i <= a.length; i++) {
+    matrix[i] = [i];
+    for (let j = 1; j <= b.length; j++) {
+      if (i === 0) { matrix[i][j] = j; continue; }
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,
+        matrix[i][j - 1] + 1,
+        matrix[i - 1][j - 1] + cost
+      );
+    }
+  }
+  dist = matrix[a.length][b.length];
+  // Allow merge if edit distance <= 2 and the words are reasonably long
+  return dist <= 2 && dist / maxLen < 0.4;
+}
+
 export function dynamicAggregate(rows: RawRow[], analysis: DataAnalysis) {
   const columnCounts: Record<string, Record<string, number>> = {};
   
   for (const col of analysis.columns) {
     if (col.type === "categorical") {
-      const counts: Record<string, number> = {};
+      // Case-insensitive + spelling-tolerant normalization
+      // Group by lowercase, pick the most frequent casing as canonical display name
+      const lowerToCanonical: Record<string, string> = {};
+      const lowerCounts: Record<string, number> = {};
+      const casingCounts: Record<string, Record<string, number>> = {};
+
       for (const row of rows) {
-        const val = (row[col.name] || "").trim();
-        if (val) counts[val] = (counts[val] || 0) + 1;
+        const raw = (row[col.name] || "").trim();
+        if (!raw) continue;
+        const lower = raw.toLowerCase();
+        lowerCounts[lower] = (lowerCounts[lower] || 0) + 1;
+        if (!casingCounts[lower]) casingCounts[lower] = {};
+        casingCounts[lower][raw] = (casingCounts[lower][raw] || 0) + 1;
       }
+
+      // Pick the most common casing as canonical display name
+      const counts: Record<string, number> = {};
+      for (const [lower, total] of Object.entries(lowerCounts)) {
+        const casings = casingCounts[lower];
+        const canonical = Object.entries(casings).sort(([, a], [, b]) => b - a)[0][0];
+        counts[canonical] = total;
+      }
+
+      // Fuzzy merge: merge values that differ by 1-2 chars (typo tolerance)
+      const keys = Object.keys(counts);
+      const merged = new Set<string>();
+      for (let i = 0; i < keys.length; i++) {
+        if (merged.has(keys[i])) continue;
+        for (let j = i + 1; j < keys.length; j++) {
+          if (merged.has(keys[j])) continue;
+          if (areSimilar(keys[i].toLowerCase(), keys[j].toLowerCase())) {
+            // Merge j into i (keep the one with higher count)
+            if (counts[keys[i]] >= counts[keys[j]]) {
+              counts[keys[i]] += counts[keys[j]];
+              delete counts[keys[j]];
+              merged.add(keys[j]);
+            } else {
+              counts[keys[j]] += counts[keys[i]];
+              delete counts[keys[i]];
+              merged.add(keys[i]);
+              break;
+            }
+          }
+        }
+      }
+
       columnCounts[col.name] = counts;
     }
   }
