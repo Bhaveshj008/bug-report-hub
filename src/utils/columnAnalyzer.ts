@@ -198,6 +198,35 @@ function pickKPIColumns(columns: ColumnAnalysis[]): string[] {
     .map(c => c.name);
 }
 
+/**
+ * Levenshtein distance check — returns true if strings differ by at most 2 chars
+ * and are at least 4 chars long (to avoid merging short distinct values)
+ */
+function areSimilar(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (a.length < 4 || b.length < 4) return false;
+  if (Math.abs(a.length - b.length) > 2) return false;
+
+  const maxLen = Math.max(a.length, b.length);
+  let dist = 0;
+  const matrix: number[][] = [];
+  for (let i = 0; i <= a.length; i++) {
+    matrix[i] = [i];
+    for (let j = 1; j <= b.length; j++) {
+      if (i === 0) { matrix[i][j] = j; continue; }
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,
+        matrix[i][j - 1] + 1,
+        matrix[i - 1][j - 1] + cost
+      );
+    }
+  }
+  dist = matrix[a.length][b.length];
+  // Allow merge if edit distance <= 2 and the words are reasonably long
+  return dist <= 2 && dist / maxLen < 0.4;
+}
+
 export function dynamicAggregate(rows: RawRow[], analysis: DataAnalysis) {
   const columnCounts: Record<string, Record<string, number>> = {};
   
