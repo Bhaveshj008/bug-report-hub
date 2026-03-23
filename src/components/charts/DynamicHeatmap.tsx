@@ -17,22 +17,34 @@ interface Props {
 
 export function DynamicHeatmap({ rows, col1, col2, title }: Props) {
   const { values1, values2, heatData, maxCount } = useMemo(() => {
-    const c1Counts: Record<string, number> = {};
-    const c2Counts: Record<string, number> = {};
+    const c1Counts: Record<string, string> = {};
+    const c2Counts: Record<string, string> = {};
     for (const r of rows) {
       const v1 = (r[col1] || "").trim();
       const v2 = (r[col2] || "").trim();
-      if (v1) c1Counts[v1] = (c1Counts[v1] || 0) + 1;
-      if (v2) c2Counts[v2] = (c2Counts[v2] || 0) + 1;
+      if (v1) c1Counts[v1.toLowerCase()] = v1;
+      if (v2) c2Counts[v2.toLowerCase()] = v2;
     }
-    const v1 = Object.entries(c1Counts).sort(([, a], [, b]) => b - a).slice(0, 8).map(([k]) => k);
-    const v2 = Object.entries(c2Counts).sort(([, a], [, b]) => b - a).slice(0, 8).map(([k]) => k);
+    
+    const c1Freq: Record<string, number> = {};
+    const c2Freq: Record<string, number> = {};
+    for (const r of rows) {
+      const v1 = (r[col1] || "").trim().toLowerCase();
+      const v2 = (r[col2] || "").trim().toLowerCase();
+      if (v1) c1Freq[v1] = (c1Freq[v1] || 0) + 1;
+      if (v2) c2Freq[v2] = (c2Freq[v2] || 0) + 1;
+    }
+    
+    const v1Keys = Object.entries(c1Freq).sort(([, a], [, b]) => b - a).slice(0, 8).map(([k]) => k);
+    const v2Keys = Object.entries(c2Freq).sort(([, a], [, b]) => b - a).slice(0, 8).map(([k]) => k);
+    const v1 = v1Keys.map(k => c1Counts[k]);
+    const v2 = v2Keys.map(k => c2Counts[k]);
 
     const data: number[][] = [];
     let max = 0;
     for (let i = 0; i < v1.length; i++) {
       for (let j = 0; j < v2.length; j++) {
-        const count = rows.filter(r => (r[col1] || "").trim() === v1[i] && (r[col2] || "").trim() === v2[j]).length;
+        const count = rows.filter(r => (r[col1] || "").trim().toLowerCase() === v1[i].toLowerCase() && (r[col2] || "").trim().toLowerCase() === v2[j].toLowerCase()).length;
         data.push([j, i, count]);
         if (count > max) max = count;
       }

@@ -26,12 +26,13 @@ export function SeverityPieChart({ data, title }: SeverityPieChartProps) {
   const option: echarts.EChartsCoreOption = {
     tooltip: {
       trigger: "item",
-      backgroundColor: "rgba(15,15,20,0.9)",
-      borderColor: "rgba(255,255,255,0.1)",
+      backgroundColor: "rgba(15,15,20,0.95)",
+      borderColor: "rgba(255,255,255,0.2)",
       textStyle: { color: "#e2e8f0", fontSize: 12 },
+      padding: [8, 12],
       formatter: (params: any) => {
         const pct = total > 0 ? ((params.value / total) * 100).toFixed(1) : "0";
-        return `<b>${params.name}</b><br/>${params.value} (${pct}%)`;
+        return `<b>${params.name}</b><br/>Count: <b>${params.value}</b><br/>Percentage: <b>${pct}%</b>`;
       },
     },
     color: COLORS,
@@ -49,7 +50,9 @@ export function SeverityPieChart({ data, title }: SeverityPieChartProps) {
         label: {
           show: true,
           position: "outside",
-          formatter: "{b}\n{d}%",
+          formatter: (params: any) => {
+            return `${params.name}\n${params.value}(${params.percent}%)`;
+          },
           fontSize: 11,
           color: "#94a3b8",
           lineHeight: 16,

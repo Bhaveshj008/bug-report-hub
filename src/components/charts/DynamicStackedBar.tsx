@@ -22,34 +22,51 @@ const STACK_COLORS = [
 
 export function DynamicStackedBar({ rows, groupCol, stackCol, title }: Props) {
   const { groups, stackValues, seriesData } = useMemo(() => {
-    const groupCounts: Record<string, number> = {};
+    const groupCounts: Record<string, string> = {};
+    const groupFreq: Record<string, number> = {};
     for (const r of rows) {
       const g = (r[groupCol] || "").trim();
-      if (g) groupCounts[g] = (groupCounts[g] || 0) + 1;
+      if (g) {
+        const gLower = g.toLowerCase();
+        if (!groupCounts[gLower]) groupCounts[gLower] = g;
+        groupFreq[gLower] = (groupFreq[gLower] || 0) + 1;
+      }
     }
-    const topGroups = Object.entries(groupCounts).sort(([, a], [, b]) => b - a).slice(0, 8).map(([k]) => k);
+    const topGroupKeys = Object.entries(groupFreq).sort(([, a], [, b]) => b - a).slice(0, 8).map(([k]) => k);
+    const topGroups = topGroupKeys.map(k => groupCounts[k]);
 
-    const stackSet = new Set<string>();
+    const stackSet: Record<string, string> = {};
     const matrix: Record<string, Record<string, number>> = {};
     for (const group of topGroups) {
-      matrix[group] = {};
+      const groupLower = group.toLowerCase();
+      matrix[groupLower] = {};
       for (const r of rows) {
-        if ((r[groupCol] || "").trim() === group) {
+        const gRaw = (r[groupCol] || "").trim();
+        if (gRaw.toLowerCase() === groupLower) {
           const sv = (r[stackCol] || "").trim();
           if (sv) {
-            stackSet.add(sv);
-            matrix[group][sv] = (matrix[group][sv] || 0) + 1;
+            const svLower = sv.toLowerCase();
+            if (!stackSet[svLower]) stackSet[svLower] = sv;
+            matrix[groupLower][svLower] = (matrix[groupLower][svLower] || 0) + 1;
           }
         }
       }
     }
 
-    const stacks = Array.from(stackSet).slice(0, 8);
+    const stacks = Object.values(stackSet).slice(0, 8);
     const series = stacks.map((sv, i) => ({
       name: sv,
       type: "bar" as const,
       stack: "total",
-      data: topGroups.map(g => matrix[g][sv] || 0),
+      data: topGroups.map(g => matrix[g.toLowerCase()][sv.toLowerCase()] || 0),
+      label: {
+        show: true,
+        position: "inside",
+        formatter: (params: any) => params.value > 0 ? params.value : "",
+        fontSize: 9,
+        color: "#ffffff",
+        fontWeight: "bold",
+      },
       itemStyle: { color: STACK_COLORS[i % STACK_COLORS.length], borderRadius: i === stacks.length - 1 ? [3, 3, 0, 0] : 0 },
       animationDuration: 600,
       animationDelay: (idx: number) => idx * 80,

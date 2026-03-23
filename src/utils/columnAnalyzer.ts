@@ -91,15 +91,20 @@ export function analyzeColumns(rows: RawRow[]): DataAnalysis {
     const type = detectColumnType(header, nonEmpty);
     
     const counts: Record<string, number> = {};
+    const originalValues: Record<string, string> = {};
     for (const v of nonEmpty) {
       const val = v.trim();
-      if (val) counts[val] = (counts[val] || 0) + 1;
+      const valLower = val.toLowerCase();
+      if (val) {
+        counts[valLower] = (counts[valLower] || 0) + 1;
+        if (!originalValues[valLower]) originalValues[valLower] = val;
+      }
     }
 
     const topValues = Object.entries(counts)
       .sort(([, a], [, b]) => b - a)
       .slice(0, 20)
-      .map(([value, count]) => ({ value, count }));
+      .map(([key, count]) => ({ value: originalValues[key], count }));
 
     columns.push({
       name: header,

@@ -34,7 +34,12 @@ export function DynamicTable({ rows, analysis, onSelectRow }: Props) {
   const filterOptions = useMemo(() => {
     const opts: Record<string, string[]> = {};
     for (const col of filterColumns) {
-      opts[col.name] = [...new Set(rows.map(r => r[col.name]).filter(Boolean))].sort();
+      const valueMap: Record<string, string> = {};
+      for (const val of rows.map(r => r[col.name]).filter(Boolean)) {
+        const key = val.toLowerCase();
+        if (!valueMap[key]) valueMap[key] = val;
+      }
+      opts[col.name] = Object.values(valueMap).sort();
     }
     return opts;
   }, [rows, filterColumns]);
@@ -42,7 +47,7 @@ export function DynamicTable({ rows, analysis, onSelectRow }: Props) {
   const filtered = useMemo(() => {
     let result = rows;
     for (const [col, val] of Object.entries(filters)) {
-      if (val) result = result.filter(r => r[col] === val);
+      if (val) result = result.filter(r => (r[col] || "").toLowerCase() === val.toLowerCase());
     }
     if (search) {
       const q = search.toLowerCase();
