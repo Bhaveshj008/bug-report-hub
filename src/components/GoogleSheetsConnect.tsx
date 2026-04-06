@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
-  Link2, RefreshCw, Unplug, Loader2, Clock, ExternalLink,
+  Link2, RefreshCw, Unplug, Loader2, Clock, ExternalLink, AlertCircle,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -37,7 +37,7 @@ export function GoogleSheetsConnect({
       const target = url || activeConfig?.url || "";
       const parsed = extractSheetId(target);
       if (!parsed) {
-        if (!silent) setError("Invalid Google Sheets URL");
+        if (!silent) setError("Invalid Google Sheets URL. Make sure it contains /spreadsheets/d/");
         return;
       }
 
@@ -53,15 +53,12 @@ export function GoogleSheetsConnect({
           lastFetched: Date.now(),
         };
 
-        // If we already have an active sheet selected, only refresh that sheet
         const alreadySelectedSheet = activeConfig?.sheetName;
 
-        // With API key — use Sheets API
         if (googleApiKey) {
           const allSheets = await fetchAllGoogleSheets(parsed.sheetId, googleApiKey);
           setAvailableSheets(allSheets);
 
-          // If refreshing and we already picked a sheet, find and reload only that one
           if (alreadySelectedSheet) {
             const match = allSheets.find(s => s.name === alreadySelectedSheet);
             if (match) {
@@ -71,12 +68,12 @@ export function GoogleSheetsConnect({
               if (!silent) setLoading(false);
               return;
             }
-            // If sheet not found but was previously selected, still load it silently
-            // User might have deleted/renamed sheet - don't interrupt with selector
-            if (silent) {
-              if (!silent) setLoading(false);
-              return;
+            // Sheet was deleted or renamed
+            if (!silent) {
+              setError(`Sheet "${alreadySelectedSheet}" no longer exists in this workbook.`);
+              setLoading(false);
             }
+            return;
           }
 
           if (allSheets.length > 1) {
@@ -94,12 +91,11 @@ export function GoogleSheetsConnect({
           }
         }
 
-        // Without API key — download entire workbook as xlsx to detect all sheets
+        // Without API key — download workbook
         try {
           const sheets = await fetchPublicSpreadsheetAsWorkbook(parsed.sheetId);
           setAvailableSheets(sheets);
 
-          // If refreshing and we already picked a sheet, find and reload only that one
           if (alreadySelectedSheet) {
             const match = sheets.find(s => s.name === alreadySelectedSheet);
             if (match) {
@@ -109,12 +105,11 @@ export function GoogleSheetsConnect({
               if (!silent) setLoading(false);
               return;
             }
-            // If sheet not found but was previously selected, still load it silently
-            // User might have deleted/renamed sheet - don't interrupt with selector
-            if (silent) {
-              if (!silent) setLoading(false);
-              return;
+            if (!silent) {
+              setError(`Sheet "${alreadySelectedSheet}" no longer exists in this workbook.`);
+              setLoading(false);
             }
+            return;
           }
 
           if (sheets.length > 1) {
@@ -131,16 +126,16 @@ export function GoogleSheetsConnect({
             return;
           }
         } catch {
-          // Fallback to CSV method for single sheet
+          // Fallback to CSV
         }
 
-        // Final fallback: fetch single sheet via CSV export
+        // Final fallback: CSV export
         const sheet = await fetchGoogleSheet(parsed.sheetId, parsed.gid, googleApiKey);
         config.sheetName = sheet.name;
         setLastFetched(Date.now());
         onSheetLoaded(sheet, config);
       } catch (e: any) {
-        if (!silent) setError(e.message || "Failed to fetch sheet");
+        if (!silent) setError(e.message || "Failed to fetch sheet. Check the URL and sharing settings.");
       }
       if (!silent) setLoading(false);
     },
@@ -148,31 +143,24 @@ export function GoogleSheetsConnect({
   );
 
   useEffect(() => {
-    // Fetch available sheets when activeConfig is present
     const loadAvailableSheets = async () => {
       if (!activeConfig?.sheetId) return;
-
       try {
-        // Try with API key first
         if (googleApiKey) {
           const allSheets = await fetchAllGoogleSheets(activeConfig.sheetId, googleApiKey);
           setAvailableSheets(allSheets);
           return;
         }
-
-        // Fallback to public workbook fetch
         try {
           const sheets = await fetchPublicSpreadsheetAsWorkbook(activeConfig.sheetId);
           setAvailableSheets(sheets);
         } catch {
-          // If both fail, just set empty array
           setAvailableSheets([]);
         }
       } catch {
         setAvailableSheets([]);
       }
     };
-
     loadAvailableSheets();
   }, [activeConfig?.sheetId, googleApiKey]);
 
@@ -192,7 +180,6 @@ export function GoogleSheetsConnect({
   const handleSwitchSheet = useCallback(async (sheetName: string) => {
     const sheet = availableSheets.find(s => s.name === sheetName);
     if (!sheet || !activeConfig) return;
-
     setLoading(true);
     try {
       const config: GoogleSheetsConfig = {
@@ -212,11 +199,11 @@ export function GoogleSheetsConnect({
     return (
       <div className="rounded-lg border bg-card p-4 space-y-3 animate-fade-in">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Link2 className="h-4 w-4 text-primary" />
+          <div className="flex items-center gap-2 flex-wrap">
+            <Link2 className="h-4 w-4 text-primary shrink-0" />
             <span className="text-sm font-medium text-foreground">Google Sheets Connected</span>
             {activeConfig.sheetName && availableSheets.length > 1 ? (
-              <select 
+              <select
                 value={activeConfig.sheetName}
                 onChange={(e) => handleSwitchSheet(e.target.value)}
                 disabled={loading}
@@ -228,19 +215,27 @@ export function GoogleSheetsConnect({
               </select>
             ) : (
               activeConfig.sheetName && (
-                <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">{activeConfig.sheetName}</span>
+                <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+                  {activeConfig.sheetName}
+                </span>
               )
             )}
-            <span className="h-2 w-2 rounded-full bg-chart-low animate-pulse" />
+            <span className="h-2 w-2 rounded-full bg-chart-low animate-pulse shrink-0" />
           </div>
-          <div className="flex items-center gap-1.5">
-            <button onClick={() => fetchSheet()} disabled={loading}
-              className="flex h-8 items-center gap-1.5 rounded-md border bg-card px-2.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50">
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              onClick={() => fetchSheet()}
+              disabled={loading}
+              className="flex h-8 items-center gap-1.5 rounded-md border bg-card px-2.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
+            >
               {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
               Refresh
             </button>
-            <button onClick={onDisconnect}
-              className="flex h-8 items-center gap-1.5 rounded-md border bg-card px-2.5 text-xs font-medium text-destructive hover:bg-destructive/10">
+            <button
+              onClick={onDisconnect}
+              className="flex h-8 items-center gap-1.5 rounded-md border bg-card px-2.5 text-xs font-medium text-destructive hover:bg-destructive/10"
+              title="Disconnect Google Sheet"
+            >
               <Unplug className="h-3.5 w-3.5" />
             </button>
           </div>
@@ -253,8 +248,12 @@ export function GoogleSheetsConnect({
               Last: {new Date(lastFetched).toLocaleTimeString()}
             </span>
           )}
-          <a href={activeConfig.url} target="_blank" rel="noopener noreferrer"
-            className="flex items-center gap-1 text-primary hover:underline">
+          <a
+            href={activeConfig.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1 text-primary hover:underline"
+          >
             <ExternalLink className="h-3 w-3" /> Open sheet
           </a>
         </div>
@@ -265,8 +264,11 @@ export function GoogleSheetsConnect({
             <Label className="text-xs text-foreground">Auto-refresh</Label>
           </div>
           {autoPoll && (
-            <select value={pollInterval} onChange={(e) => setPollInterval(Number(e.target.value))}
-              className="h-7 rounded border bg-background px-2 text-xs text-foreground">
+            <select
+              value={pollInterval}
+              onChange={(e) => setPollInterval(Number(e.target.value))}
+              className="h-7 rounded border bg-background px-2 text-xs text-foreground"
+            >
               <option value={10}>10s</option>
               <option value={30}>30s</option>
               <option value={60}>1 min</option>
@@ -275,7 +277,13 @@ export function GoogleSheetsConnect({
             </select>
           )}
         </div>
-        {error && <p className="text-xs text-destructive">{error}</p>}
+
+        {error && (
+          <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2">
+            <AlertCircle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
+            <p className="text-xs text-destructive">{error}</p>
+          </div>
+        )}
       </div>
     );
   }
@@ -287,15 +295,27 @@ export function GoogleSheetsConnect({
         <span className="text-sm font-semibold text-foreground">Connect Google Sheet</span>
       </div>
       <p className="text-xs text-muted-foreground">
-        Paste a Google Sheets URL. Sheet must be shared as "Anyone with the link".
-        {" "}Multi-sheet workbooks will show a sheet selector.
+        Paste a Google Sheets URL. Sheet must be shared as &quot;Anyone with the link&quot;.
+        Multi-sheet workbooks will show a sheet selector.
       </p>
-      <Input value={url} onChange={(e) => setUrl(e.target.value)}
+      <Input
+        value={url}
+        onChange={(e) => { setUrl(e.target.value); setError(""); }}
+        onKeyDown={(e) => e.key === "Enter" && !loading && handleConnect()}
         placeholder="https://docs.google.com/spreadsheets/d/..."
-        className="text-xs font-mono" />
-      {error && <p className="text-xs text-destructive">{error}</p>}
-      <button onClick={handleConnect} disabled={loading}
-        className="flex h-9 w-full items-center justify-center gap-2 rounded-md bg-primary text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50">
+        className="text-xs font-mono"
+      />
+      {error && (
+        <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2">
+          <AlertCircle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
+          <p className="text-xs text-destructive">{error}</p>
+        </div>
+      )}
+      <button
+        onClick={handleConnect}
+        disabled={loading}
+        className="flex h-9 w-full items-center justify-center gap-2 rounded-md bg-primary text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+      >
         {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
         {loading ? "Connecting…" : "Connect"}
       </button>

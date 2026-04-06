@@ -1,10 +1,10 @@
 import ReactEChartsCore from "echarts-for-react/lib/core";
 import * as echarts from "echarts/core";
 import { BarChart } from "echarts/charts";
-import { TooltipComponent, GridComponent } from "echarts/components";
+import { TooltipComponent, GridComponent, DataZoomComponent } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 
-echarts.use([BarChart, TooltipComponent, GridComponent, CanvasRenderer]);
+echarts.use([BarChart, TooltipComponent, GridComponent, DataZoomComponent, CanvasRenderer]);
 
 interface HBarChartProps {
   data: Record<string, number>;
@@ -21,7 +21,6 @@ export function HBarChart({ data, title }: HBarChartProps) {
   const total = Object.values(data).reduce((s, v) => s + v, 0);
   const chartData = Object.entries(data)
     .sort(([, a], [, b]) => b - a)
-    .slice(0, 12)
     .reverse(); // reverse for horizontal so biggest is on top
 
   const option: echarts.EChartsCoreOption = {
@@ -32,7 +31,14 @@ export function HBarChart({ data, title }: HBarChartProps) {
       borderColor: "rgba(255,255,255,0.1)",
       textStyle: { color: "#e2e8f0", fontSize: 12 },
     },
-    grid: { left: 10, right: 30, top: 8, bottom: 8, containLabel: true },
+    // Added dataZoom for scrolling through all modules
+    dataZoom: [
+      { type: "inside", yAxisIndex: 0 },
+      { type: "slider", show: true, yAxisIndex: 0, right: 0, width: 16, 
+        borderColor: "transparent", fillerColor: "rgba(255,255,255,0.1)", 
+        handleStyle: { color: "#94a3b8" }, showDetail: false }
+    ],
+    grid: { left: 10, right: 36, top: 8, bottom: 8, containLabel: true },
     xAxis: {
       type: "value",
       axisLabel: { fontSize: 10, color: "#94a3b8" },
@@ -75,8 +81,8 @@ export function HBarChart({ data, title }: HBarChartProps) {
   return (
     <div className="rounded-xl border bg-card p-5 animate-fade-in">
       <h3 className="mb-1 text-sm font-semibold text-foreground">{title}</h3>
-      <p className="mb-2 text-[11px] text-muted-foreground">Top {chartData.length} · {total} total</p>
-      <ReactEChartsCore echarts={echarts} option={option} style={{ height: Math.max(200, chartData.length * 34) }} notMerge lazyUpdate />
+      <p className="mb-2 text-[11px] text-muted-foreground">{chartData.length} items · {total} total</p>
+      <ReactEChartsCore echarts={echarts} option={option} style={{ height: 280 }} notMerge lazyUpdate />
     </div>
   );
 }

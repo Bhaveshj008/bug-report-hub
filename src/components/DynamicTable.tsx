@@ -16,9 +16,10 @@ export function DynamicTable({ rows, analysis, onSelectRow }: Props) {
   const [page, setPage] = useState(0);
   const perPage = 25;
 
-  // Show all columns except very long text — up to 10
+  // Show all columns except internal and very long text — up to 10
   const visibleColumns = useMemo(() => {
     return analysis.columns
+      .filter(c => c.name !== "__sheet")
       .filter(c => c.type !== "text" || c.fillRate > 70)
       .slice(0, 10)
       .map(c => c.name);
@@ -27,6 +28,7 @@ export function DynamicTable({ rows, analysis, onSelectRow }: Props) {
   // Filterable columns
   const filterColumns = useMemo(() => {
     return analysis.columns
+      .filter(c => c.name !== "__sheet")
       .filter(c => c.type === "categorical" && c.uniqueCount <= 25 && c.uniqueCount >= 2)
       .slice(0, 5);
   }, [analysis]);
@@ -58,7 +60,6 @@ export function DynamicTable({ rows, analysis, onSelectRow }: Props) {
     if (sortCol) {
       result = [...result].sort((a, b) => {
         const av = a[sortCol] || "", bv = b[sortCol] || "";
-        // Try numeric sort
         const an = parseFloat(av), bn = parseFloat(bv);
         if (!isNaN(an) && !isNaN(bn)) return sortAsc ? an - bn : bn - an;
         return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
@@ -72,8 +73,9 @@ export function DynamicTable({ rows, analysis, onSelectRow }: Props) {
   const activeFilters = Object.values(filters).filter(Boolean).length;
 
   const toggleSort = (col: string) => {
-    if (sortCol === col) setSortAsc(!sortAsc);
+    if (sortCol === col) setSortAsc(prev => !prev);
     else { setSortCol(col); setSortAsc(true); }
+    setPage(0); // always reset to first page on sort
   };
 
   return (
@@ -101,7 +103,7 @@ export function DynamicTable({ rows, analysis, onSelectRow }: Props) {
           </select>
         ))}
         {activeFilters > 0 && (
-          <button onClick={() => setFilters({})} className="flex items-center gap-1 text-xs text-primary hover:underline">
+          <button onClick={() => { setFilters({}); setPage(0); }} className="flex items-center gap-1 text-xs text-primary hover:underline">
             <Filter className="h-3 w-3" /> Clear {activeFilters}
           </button>
         )}
@@ -148,8 +150,13 @@ export function DynamicTable({ rows, analysis, onSelectRow }: Props) {
             ))}
             {paged.length === 0 && (
               <tr>
-                <td colSpan={visibleColumns.length + 1} className="px-4 py-8 text-center text-muted-foreground">
-                  No matching records found
+                <td colSpan={visibleColumns.length + 1} className="px-4 py-10 text-center text-muted-foreground">
+                  <p className="text-sm font-medium">No matching records found</p>
+                  {activeFilters > 0 && (
+                    <button onClick={() => { setFilters({}); setSearch(""); setPage(0); }} className="mt-2 text-xs text-primary hover:underline">
+                      Clear all filters
+                    </button>
+                  )}
                 </td>
               </tr>
             )}
@@ -161,7 +168,7 @@ export function DynamicTable({ rows, analysis, onSelectRow }: Props) {
       {totalPages > 1 && (
         <div className="flex items-center justify-between border-t px-4 py-2.5 bg-muted/10">
           <span className="text-xs text-muted-foreground">
-            Showing {page * perPage + 1}–{Math.min((page + 1) * perPage, filtered.length)} of {filtered.length}
+            Showing {page * perPage + 1}–{Math.min((page + 1) * perPage, filtered.length)} of {filtered.length.toLocaleString()}
           </span>
           <div className="flex items-center gap-1">
             <button onClick={() => setPage(0)} disabled={page === 0}
@@ -174,6 +181,16 @@ export function DynamicTable({ rows, analysis, onSelectRow }: Props) {
             <button onClick={() => setPage(totalPages - 1)} disabled={page >= totalPages - 1}
               className="rounded-md border px-2 py-1 text-xs text-foreground disabled:opacity-30 hover:bg-muted">Last</button>
           </div>
+        </div>
+      )}
+      {totalPages <= 1 && filtered.length > 0 && (
+        <div className="border-t px-4 py-2 bg-muted/10">
+          <span className="text-xs text-muted-foreground">{filtered.length} record{filtered.length !== 1 ? "s" : ""}</span>
+        </div>
+      )}
+      {filtered.length === 0 && (search || activeFilters > 0) && (
+        <div className="border-t px-4 py-2.5 bg-muted/10">
+          <span className="text-xs text-muted-foreground">No matching records</span>
         </div>
       )}
     </div>

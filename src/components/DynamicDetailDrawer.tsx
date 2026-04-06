@@ -7,11 +7,14 @@ interface Props {
 }
 
 const URL_REGEX = /^https?:\/\//i;
+const INTERNAL_KEYS = ["__sheet"];
 
 export function DynamicDetailDrawer({ row, onClose }: Props) {
   if (!row) return null;
 
-  const entries = Object.entries(row).filter(([, v]) => v && v.trim());
+  const entries = Object.entries(row)
+    .filter(([k, v]) => !INTERNAL_KEYS.includes(k) && v && v.trim());
+
   const shortFields = entries.filter(([, v]) => v.length <= 80);
   const longFields = entries.filter(([, v]) => v.length > 80);
 
@@ -28,6 +31,9 @@ export function DynamicDetailDrawer({ row, onClose }: Props) {
           </button>
         </div>
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+          {entries.length === 0 && (
+            <p className="text-sm text-muted-foreground text-center py-8">No data to display for this row.</p>
+          )}
           <div className="grid grid-cols-2 gap-3">
             {shortFields.map(([key, value]) => (
               <div key={key}>

@@ -8,6 +8,8 @@ export type SheetInfo = {
   sampleRows: Record<string, string>[];
 };
 
+export const MAX_ROWS = 10000;
+
 const DATA_KEYWORDS = [
   "jira", "defect", "bug", "severity", "priority", "component",
   "steps", "reproduce", "expected", "actual", "platform", "category",
@@ -30,7 +32,7 @@ function detectHeaderRow(sheet: XLSX.WorkSheet): number {
       if (cell && cell.v != null) {
         nonEmpty++;
         const val = String(cell.v).toLowerCase();
-      for (const kw of DATA_KEYWORDS) {
+        for (const kw of DATA_KEYWORDS) {
           if (val.includes(kw)) { score += 2; break; }
         }
       }
@@ -51,6 +53,12 @@ function getHeaders(sheet: XLSX.WorkSheet, headerRow: number): string[] {
   return headers;
 }
 
+export type ParseResult = {
+  sheets: SheetInfo[];
+  truncated: boolean;
+  totalRowsParsed: number;
+};
+
 export function parseWorkbook(data: ArrayBuffer): SheetInfo[] {
   const wb = XLSX.read(data, { type: "array" });
   return wb.SheetNames.map((name) => {
@@ -61,6 +69,7 @@ export function parseWorkbook(data: ArrayBuffer): SheetInfo[] {
     const range = XLSX.utils.decode_range(sheet["!ref"] || "A1");
     const allRows: Record<string, string>[] = [];
     for (let r = headerRowIndex + 1; r <= range.e.r; r++) {
+      if (allRows.length >= MAX_ROWS) break;
       const row: Record<string, string> = {};
       let hasValue = false;
       for (let c = range.s.c; c <= Math.min(range.e.c, headers.length - 1 + range.s.c); c++) {
@@ -81,6 +90,51 @@ export function parseWorkbook(data: ArrayBuffer): SheetInfo[] {
       sampleRows: allRows,
     };
   });
+}
+
+export function parseWorkbookWithMeta(data: ArrayBuffer): ParseResult {
+  const wb = XLSX.read(data, { type: "array" });
+  let truncated = false;
+  let totalRowsParsed = 0;
+
+  const sheets = wb.SheetNames.map((name) => {
+    const sheet = wb.Sheets[name];
+    const headerRowIndex = detectHeaderRow(sheet);
+    const headers = getHeaders(sheet, headerRowIndex);
+
+    const range = XLSX.utils.decode_range(sheet["!ref"] || "A1");
+    const totalInSheet = range.e.r - headerRowIndex;
+    const allRows: Record<string, string>[] = [];
+
+    for (let r = headerRowIndex + 1; r <= range.e.r; r++) {
+      if (allRows.length >= MAX_ROWS) {
+        truncated = true;
+        break;
+      }
+      const row: Record<string, string> = {};
+      let hasValue = false;
+      for (let c = range.s.c; c <= Math.min(range.e.c, headers.length - 1 + range.s.c); c++) {
+        const cell = sheet[XLSX.utils.encode_cell({ r, c })];
+        const hdr = headers[c - range.s.c];
+        const val = cell ? String(cell.v).trim() : "";
+        row[hdr] = val;
+        if (val) hasValue = true;
+      }
+      if (hasValue) allRows.push(row);
+    }
+
+    totalRowsParsed += totalInSheet;
+
+    return {
+      name,
+      rowCount: allRows.length,
+      headers,
+      headerRowIndex,
+      sampleRows: allRows,
+    };
+  });
+
+  return { sheets, truncated, totalRowsParsed };
 }
 
 export function selectBestSheet(sheets: SheetInfo[]): SheetInfo {

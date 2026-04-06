@@ -22,43 +22,53 @@ const STACK_COLORS = [
 
 export function DynamicStackedBar({ rows, groupCol, stackCol, title }: Props) {
   const { groups, stackValues, seriesData } = useMemo(() => {
-    const groupCounts: Record<string, string> = {};
+    // Single-pass: build cross-frequency map — O(n)
+    const groupCanonical: Record<string, string> = {};
     const groupFreq: Record<string, number> = {};
+    const stackCanonical: Record<string, string> = {};
+    const crossFreq: Record<string, Record<string, number>> = {};
+
     for (const r of rows) {
       const g = (r[groupCol] || "").trim();
-      if (g) {
-        const gLower = g.toLowerCase();
-        if (!groupCounts[gLower]) groupCounts[gLower] = g;
-        groupFreq[gLower] = (groupFreq[gLower] || 0) + 1;
-      }
-    }
-    const topGroupKeys = Object.entries(groupFreq).sort(([, a], [, b]) => b - a).slice(0, 8).map(([k]) => k);
-    const topGroups = topGroupKeys.map(k => groupCounts[k]);
+      const s = (r[stackCol] || "").trim();
+      if (!g) continue;
 
-    const stackSet: Record<string, string> = {};
-    const matrix: Record<string, Record<string, number>> = {};
-    for (const group of topGroups) {
-      const groupLower = group.toLowerCase();
-      matrix[groupLower] = {};
-      for (const r of rows) {
-        const gRaw = (r[groupCol] || "").trim();
-        if (gRaw.toLowerCase() === groupLower) {
-          const sv = (r[stackCol] || "").trim();
-          if (sv) {
-            const svLower = sv.toLowerCase();
-            if (!stackSet[svLower]) stackSet[svLower] = sv;
-            matrix[groupLower][svLower] = (matrix[groupLower][svLower] || 0) + 1;
-          }
-        }
+      const gLower = g.toLowerCase();
+      if (!groupCanonical[gLower]) groupCanonical[gLower] = g;
+      groupFreq[gLower] = (groupFreq[gLower] || 0) + 1;
+
+      if (s) {
+        const sLower = s.toLowerCase();
+        if (!stackCanonical[sLower]) stackCanonical[sLower] = s;
+        if (!crossFreq[gLower]) crossFreq[gLower] = {};
+        crossFreq[gLower][sLower] = (crossFreq[gLower][sLower] || 0) + 1;
       }
     }
 
-    const stacks = Object.values(stackSet).slice(0, 8);
+    const topGroupKeys = Object.entries(groupFreq)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 8)
+      .map(([k]) => k);
+    const topGroups = topGroupKeys.map(k => groupCanonical[k]);
+
+    // Collect all stack values seen in top groups
+    const stackFreq: Record<string, number> = {};
+    for (const gKey of topGroupKeys) {
+      const inner = crossFreq[gKey] || {};
+      for (const [sKey, cnt] of Object.entries(inner)) {
+        stackFreq[sKey] = (stackFreq[sKey] || 0) + cnt;
+      }
+    }
+    const stacks = Object.entries(stackFreq)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 8)
+      .map(([k]) => stackCanonical[k]);
+
     const series = stacks.map((sv, i) => ({
       name: sv,
       type: "bar" as const,
       stack: "total",
-      data: topGroups.map(g => matrix[g.toLowerCase()][sv.toLowerCase()] || 0),
+      data: topGroupKeys.map(gKey => (crossFreq[gKey] || {})[sv.toLowerCase()] || 0),
       label: {
         show: true,
         position: "inside",

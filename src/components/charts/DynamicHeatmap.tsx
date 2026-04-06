@@ -17,38 +17,51 @@ interface Props {
 
 export function DynamicHeatmap({ rows, col1, col2, title }: Props) {
   const { values1, values2, heatData, maxCount } = useMemo(() => {
-    const c1Counts: Record<string, string> = {};
-    const c2Counts: Record<string, string> = {};
+    // Build frequency maps — O(n) instead of O(n * rows * cols)
+    const c1Canonical: Record<string, string> = {};
+    const c2Canonical: Record<string, string> = {};
+    const c1Freq: Record<string, number> = {};
+    const c2Freq: Record<string, number> = {};
+
+    // Pre-build a cross-frequency map in a single pass — O(n)
+    const crossFreq: Record<string, number> = {};
+
     for (const r of rows) {
       const v1 = (r[col1] || "").trim();
       const v2 = (r[col2] || "").trim();
-      if (v1) c1Counts[v1.toLowerCase()] = v1;
-      if (v2) c2Counts[v2.toLowerCase()] = v2;
+      if (!v1 || !v2) continue;
+
+      const v1Lower = v1.toLowerCase();
+      const v2Lower = v2.toLowerCase();
+
+      if (!c1Canonical[v1Lower]) c1Canonical[v1Lower] = v1;
+      if (!c2Canonical[v2Lower]) c2Canonical[v2Lower] = v2;
+
+      c1Freq[v1Lower] = (c1Freq[v1Lower] || 0) + 1;
+      c2Freq[v2Lower] = (c2Freq[v2Lower] || 0) + 1;
+
+      const key = `${v1Lower}|||${v2Lower}`;
+      crossFreq[key] = (crossFreq[key] || 0) + 1;
     }
-    
-    const c1Freq: Record<string, number> = {};
-    const c2Freq: Record<string, number> = {};
-    for (const r of rows) {
-      const v1 = (r[col1] || "").trim().toLowerCase();
-      const v2 = (r[col2] || "").trim().toLowerCase();
-      if (v1) c1Freq[v1] = (c1Freq[v1] || 0) + 1;
-      if (v2) c2Freq[v2] = (c2Freq[v2] || 0) + 1;
-    }
-    
+
     const v1Keys = Object.entries(c1Freq).sort(([, a], [, b]) => b - a).slice(0, 8).map(([k]) => k);
     const v2Keys = Object.entries(c2Freq).sort(([, a], [, b]) => b - a).slice(0, 8).map(([k]) => k);
-    const v1 = v1Keys.map(k => c1Counts[k]);
-    const v2 = v2Keys.map(k => c2Counts[k]);
+
+    const v1 = v1Keys.map(k => c1Canonical[k]);
+    const v2 = v2Keys.map(k => c2Canonical[k]);
 
     const data: number[][] = [];
     let max = 0;
+
     for (let i = 0; i < v1.length; i++) {
       for (let j = 0; j < v2.length; j++) {
-        const count = rows.filter(r => (r[col1] || "").trim().toLowerCase() === v1[i].toLowerCase() && (r[col2] || "").trim().toLowerCase() === v2[j].toLowerCase()).length;
+        // O(1) lookup instead of O(n) filter
+        const count = crossFreq[`${v1Keys[i]}|||${v2Keys[j]}`] || 0;
         data.push([j, i, count]);
         if (count > max) max = count;
       }
     }
+
     return { values1: v1, values2: v2, heatData: data, maxCount: max };
   }, [rows, col1, col2]);
 
@@ -59,7 +72,8 @@ export function DynamicHeatmap({ rows, col1, col2, title }: Props) {
       backgroundColor: "rgba(15,15,20,0.9)",
       borderColor: "rgba(255,255,255,0.1)",
       textStyle: { color: "#e2e8f0", fontSize: 12 },
-      formatter: (params: any) => `${values1[params.data[1]]} × ${values2[params.data[0]]}<br/><b>${params.data[2]}</b>`,
+      formatter: (params: any) =>
+        `${values1[params.data[1]]} × ${values2[params.data[0]]}<br/><b>${params.data[2]}</b>`,
     },
     grid: { left: 10, right: 40, top: 8, bottom: 40, containLabel: true },
     xAxis: {
@@ -99,7 +113,13 @@ export function DynamicHeatmap({ rows, col1, col2, title }: Props) {
   return (
     <div className="rounded-xl border bg-card p-5 animate-fade-in">
       <h3 className="mb-3 text-sm font-semibold text-foreground">{title}</h3>
-      <ReactEChartsCore echarts={echarts} option={option} style={{ height: Math.max(220, values1.length * 40 + 60) }} notMerge lazyUpdate />
+      <ReactEChartsCore
+        echarts={echarts}
+        option={option}
+        style={{ height: Math.max(220, values1.length * 40 + 60) }}
+        notMerge
+        lazyUpdate
+      />
     </div>
   );
 }

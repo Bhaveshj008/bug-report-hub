@@ -11,15 +11,22 @@ export type AnalysisRecord = {
   insights?: string;
 };
 
+export type ChatEntry = {
+  q: string;
+  a: string;
+  timestamp: number;
+};
+
 interface BugDashDB extends DBSchema {
   bugs: { key: string; value: { id: string; rows: RawRow[]; fileName: string; timestamp: number; dataFormat?: DataFormat; googleConfig?: GoogleSheetsConfig } };
   templates: { key: string; value: TemplateFingerprint };
   preferences: { key: string; value: UserPreferences };
   history: { key: string; value: AnalysisRecord };
+  chats: { key: string; value: { key: string; entries: ChatEntry[] } };
 }
 
 const DB_NAME = "bug-dashboard";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 function getDB() {
   return openDB<BugDashDB>(DB_NAME, DB_VERSION, {
@@ -28,6 +35,7 @@ function getDB() {
       if (!db.objectStoreNames.contains("templates")) db.createObjectStore("templates");
       if (!db.objectStoreNames.contains("preferences")) db.createObjectStore("preferences");
       if (!db.objectStoreNames.contains("history")) db.createObjectStore("history");
+      if (!db.objectStoreNames.contains("chats")) db.createObjectStore("chats");
     },
   });
 }
@@ -79,6 +87,14 @@ export async function saveAnalysisRecord(record: AnalysisRecord) {
   await db.put("history", record, record.id);
 }
 
+export async function updateAnalysisRecord(id: string, patch: Partial<AnalysisRecord>) {
+  const db = await getDB();
+  const existing = await db.get("history", id);
+  if (existing) {
+    await db.put("history", { ...existing, ...patch }, id);
+  }
+}
+
 export async function loadAnalysisHistory(): Promise<AnalysisRecord[]> {
   const db = await getDB();
   const all = await db.getAll("history");
@@ -88,4 +104,29 @@ export async function loadAnalysisHistory(): Promise<AnalysisRecord[]> {
 export async function deleteAnalysisRecord(id: string) {
   const db = await getDB();
   await db.delete("history", id);
+}
+
+// === Chat History ===
+export async function saveChatHistory(datasetKey: string, entries: ChatEntry[]) {
+  const db = await getDB();
+  await db.put("chats", { key: datasetKey, entries }, datasetKey);
+}
+
+export async function loadChatHistory(datasetKey: string): Promise<ChatEntry[]> {
+  const db = await getDB();
+  try {
+    const record = await db.get("chats", datasetKey);
+    return record?.entries || [];
+  } catch {
+    return [];
+  }
+}
+
+export async function clearChatHistory(datasetKey: string) {
+  const db = await getDB();
+  try {
+    await db.delete("chats", datasetKey);
+  } catch {
+    // ignore
+  }
 }

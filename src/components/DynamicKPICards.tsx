@@ -1,79 +1,48 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Database, Eye, EyeOff } from "lucide-react";
-import type { DataAnalysis, DynamicAggregations } from "@/types/bug";
-
-// Columns that are usually noise for KPIs
-const NOISE_KEYWORDS = [
-  "os version", "browser version", "user agent", "build number", "screen resolution",
-  "device id", "session id", "ip address", "mac address", "uuid", "hash",
-];
+import type { DataAnalysis, DynamicAggregations, AISchema } from "@/types/bug";
+import { computeKPIValue, generateFallbackSchema, detectDataTypeHeuristic } from "@/utils/aiSchema";
 
 interface Props {
   analysis: DataAnalysis;
   agg: DynamicAggregations;
   fileName: string;
+  aiSchema?: AISchema | null;
   onVisibleKPIsChange?: (visibleIndices: Set<number>) => void;
 }
 
-const KPI_COLORS = [
-  { bg: "bg-primary/10", text: "text-primary", border: "border-primary/20" },
-  { bg: "bg-chart-critical/10", text: "text-chart-critical", border: "border-chart-critical/20" },
-  { bg: "bg-chart-high/10", text: "text-chart-high", border: "border-chart-high/20" },
-  { bg: "bg-chart-low/10", text: "text-chart-low", border: "border-chart-low/20" },
-  { bg: "bg-chart-medium/10", text: "text-chart-medium", border: "border-chart-medium/20" },
-  { bg: "bg-chart-info/10", text: "text-chart-info", border: "border-chart-info/20" },
+const COLOR_MAP: Record<string, { bg: string; text: string; border: string }> = {
+  red:    { bg: "bg-red-500/10",    text: "text-red-500",    border: "border-red-500/20" },
+  orange: { bg: "bg-orange-500/10", text: "text-orange-500", border: "border-orange-500/20" },
+  yellow: { bg: "bg-yellow-500/10", text: "text-yellow-500", border: "border-yellow-500/20" },
+  green:  { bg: "bg-emerald-500/10",text: "text-emerald-500",border: "border-emerald-500/20" },
+  blue:   { bg: "bg-primary/10",    text: "text-primary",    border: "border-primary/20" },
+  purple: { bg: "bg-purple-500/10", text: "text-purple-500", border: "border-purple-500/20" },
+  gray:   { bg: "bg-muted",         text: "text-muted-foreground", border: "border-border" },
+};
+
+const FALLBACK_COLORS = [
+  COLOR_MAP.blue, COLOR_MAP.red, COLOR_MAP.orange, COLOR_MAP.green,
+  COLOR_MAP.yellow, COLOR_MAP.purple, COLOR_MAP.gray,
 ];
 
-type KPIItem = { label: string; value: string | number; sub?: string; colorIdx: number };
+type KPIItem = { label: string; value: string | number; sub?: string; color: { bg: string; text: string; border: string } };
 
-export function DynamicKPICards({ analysis, agg, fileName, onVisibleKPIsChange }: Props) {
-  const kpis: KPIItem[] = [];
+export function DynamicKPICards({ analysis, agg, fileName, aiSchema, onVisibleKPIsChange }: Props) {
+  // Use AI schema or fallback schema for KPI definitions
+  const schema = useMemo(() => {
+    if (aiSchema) return aiSchema;
+    const dt = detectDataTypeHeuristic(analysis);
+    return generateFallbackSchema(analysis, agg, dt);
+  }, [aiSchema, analysis, agg]);
 
-  // Total rows — always first
-  kpis.push({ label: "Total Records", value: agg.total, colorIdx: 0 });
-
-  // Filter out noise columns
-  const filteredKPIColumns = analysis.kpiColumns.filter(colName => {
-    const lower = colName.toLowerCase();
-    return !NOISE_KEYWORDS.some(noise => lower.includes(noise));
-  });
-
-  let colorIdx = 1;
-  for (const colName of filteredKPIColumns) {
-    const counts = agg.columnCounts[colName];
-    if (!counts) continue;
-    const entries = Object.entries(counts).sort(([, a], [, b]) => b - a);
-    if (entries.length === 0) continue;
-
-    const [topValue, topCount] = entries[0];
-    const pct = agg.total > 0 ? Math.round((topCount / agg.total) * 100) : 0;
-    kpis.push({
-      label: `Top ${colName}`,
-      value: topValue,
-      sub: `${topCount} (${pct}%)`,
-      colorIdx: colorIdx++ % KPI_COLORS.length,
+  const kpis: KPIItem[] = useMemo(() => {
+    return schema.kpis.map((kpiDef, i) => {
+      const { value, sub } = computeKPIValue(kpiDef, agg, analysis);
+      const color = kpiDef.color ? (COLOR_MAP[kpiDef.color] || FALLBACK_COLORS[i % FALLBACK_COLORS.length]) : FALLBACK_COLORS[i % FALLBACK_COLORS.length];
+      return { label: kpiDef.label, value, sub, color };
     });
-
-    if (entries.length <= 6) {
-      kpis.push({
-        label: `${colName} Types`,
-        value: entries.length,
-        sub: entries.slice(0, 3).map(([v]) => v).join(", "),
-        colorIdx: colorIdx++ % KPI_COLORS.length,
-      });
-    }
-  }
-
-  // Data quality
-  const avgFill = analysis.columns.length > 0
-    ? Math.round(analysis.columns.reduce((s, c) => s + c.fillRate, 0) / analysis.columns.length)
-    : 0;
-  kpis.push({
-    label: "Data Quality",
-    value: `${avgFill}%`,
-    sub: `${analysis.columns.length} columns`,
-    colorIdx: colorIdx++ % KPI_COLORS.length,
-  });
+  }, [schema, agg, analysis]);
 
   // Visibility state - all visible by default
   const [visible, setVisible] = useState<Set<number>>(new Set(kpis.map((_, i) => i)));
@@ -97,19 +66,32 @@ export function DynamicKPICards({ analysis, agg, fileName, onVisibleKPIsChange }
     });
   };
 
+  // Data type badge
+  const dataTypeBadge = schema.dataType !== "generic" ? {
+    bug_report: "🐛 Bug Report",
+    test_execution: "🧪 Test Execution",
+    test_case: "📋 Test Case",
+    generic: "",
+  }[schema.dataType] : "";
+
   return (
     <div className="animate-fade-in space-y-3">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Database className="h-4 w-4 text-primary" />
+        <div className="flex items-center gap-3 min-w-0">
+          <Database className="h-4 w-4 text-primary shrink-0" />
           <p className="text-sm font-medium text-foreground truncate">{fileName}</p>
-          <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-semibold text-primary">
+          <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-semibold text-primary shrink-0">
             {analysis.columns.length} cols · {agg.total} rows
           </span>
+          {dataTypeBadge && (
+            <span className="rounded-full bg-accent px-2.5 py-0.5 text-[10px] font-semibold text-accent-foreground shrink-0">
+              {dataTypeBadge}
+            </span>
+          )}
         </div>
         <button
           onClick={() => setShowToggles(!showToggles)}
-          className="flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          className="flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
           title="Toggle KPI visibility for PDF export"
         >
           {showToggles ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
@@ -118,22 +100,19 @@ export function DynamicKPICards({ analysis, agg, fileName, onVisibleKPIsChange }
       </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
         {kpis.map((kpi, i) => {
-          const color = KPI_COLORS[kpi.colorIdx];
           const isVisible = visible.has(i);
-
           if (!isVisible && !showToggles) return null;
 
           return (
             <div
               key={i}
-              className={`relative rounded-xl border ${color.border} ${color.bg} p-4 transition-all hover:shadow-md ${!isVisible ? "opacity-40" : ""}`}
+              className={`relative rounded-xl border ${kpi.color.border} ${kpi.color.bg} p-4 transition-all hover:shadow-md ${!isVisible ? "opacity-40" : ""}`}
             >
               {showToggles && (
                 <button
                   onClick={() => toggleKPI(i)}
-                  className={`absolute top-2 right-2 h-5 w-5 rounded border flex items-center justify-center transition-colors ${
-                    isVisible ? "bg-primary border-primary text-primary-foreground" : "border-muted-foreground/40 text-transparent"
-                  }`}
+                  className={`absolute top-2 right-2 h-5 w-5 rounded border flex items-center justify-center transition-colors ${isVisible ? "bg-primary border-primary text-primary-foreground" : "border-muted-foreground/40 text-transparent"
+                    }`}
                 >
                   {isVisible && <span className="text-[10px]">✓</span>}
                 </button>
@@ -141,7 +120,7 @@ export function DynamicKPICards({ analysis, agg, fileName, onVisibleKPIsChange }
               <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1 truncate pr-6" title={kpi.label}>
                 {kpi.label}
               </p>
-              <p className={`text-2xl font-bold ${color.text} truncate`} title={String(kpi.value)}>
+              <p className={`text-2xl font-bold ${kpi.color.text} truncate`} title={String(kpi.value)}>
                 {kpi.value}
               </p>
               {kpi.sub && (

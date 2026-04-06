@@ -21,6 +21,7 @@ export function SettingsModal({ open, onClose, preferences, onSave }: SettingsMo
   const [showKey, setShowKey] = useState(false);
   const [googleKey, setGoogleKey] = useState(preferences.googleSheetsApiKey || "");
   const [showGoogleKey, setShowGoogleKey] = useState(false);
+  const [keyError, setKeyError] = useState("");
 
   useEffect(() => {
     setAiEnabled(preferences.aiEnabled);
@@ -38,6 +39,19 @@ export function SettingsModal({ open, onClose, preferences, onSave }: SettingsMo
   const currentKey = apiKeys[provider] || "";
 
   const handleSave = () => {
+    setKeyError("");
+    // Validate API key when AI is enabled
+    if (aiEnabled) {
+      const key = apiKeys[provider] || "";
+      if (!key.trim()) {
+        setKeyError(`Please enter your ${config.name} API key to enable AI features.`);
+        return;
+      }
+      if (config.keyPrefix && !key.startsWith(config.keyPrefix)) {
+        setKeyError(`${config.name} API key should start with "${config.keyPrefix}". Please check your key.`);
+        return;
+      }
+    }
     const activeModel = model || config.models[0].id;
     onSave({
       ...preferences,
@@ -185,10 +199,18 @@ export function SettingsModal({ open, onClose, preferences, onSave }: SettingsMo
                 </p>
               </div>
 
-              {currentKey && (
+              {currentKey && !keyError && (
                 <div className="rounded-md border border-chart-low/30 bg-chart-low/5 px-3 py-2">
                   <p className="text-xs text-foreground">
                     ✓ {config.name} key configured. AI features active.
+                  </p>
+                </div>
+              )}
+
+              {keyError && (
+                <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2">
+                  <p className="text-xs text-destructive">
+                    ⚠ {keyError}
                   </p>
                 </div>
               )}

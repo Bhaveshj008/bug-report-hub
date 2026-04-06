@@ -5,7 +5,9 @@ const DATE_REGEX = /^\d{1,4}[-\/\.]\d{1,2}[-\/\.]\d{1,4}(\s|T|$)/;
 const NUMBER_REGEX = /^-?\d+(\.\d+)?$/;
 const CURRENCY_REGEX = /^[\$€£₹¥]?\s*-?\d[\d,]*(\.\d+)?$/;
 
-// Priority keywords for important columns
+// Internal columns to always skip
+const INTERNAL_COLUMNS = ["__sheet"];
+
 const PRIORITY_KEYWORDS = [
   "severity", "priority", "status", "type", "category", "module",
   "component", "platform", "environment", "result", "pass", "fail",
@@ -26,10 +28,9 @@ const TEXT_KEYWORDS = [
 function detectColumnType(name: string, values: string[]): ColumnType {
   const lowerName = name.toLowerCase().trim();
   const nonEmpty = values.filter(v => v && v.trim());
-  
+
   if (nonEmpty.length === 0) return "text";
 
-  // Name-based hints
   if (ID_KEYWORDS.some(k => lowerName === k || lowerName.endsWith(" " + k) || lowerName.startsWith(k + " ") || lowerName.endsWith("_" + k))) {
     const uniqueRatio = new Set(nonEmpty).size / nonEmpty.length;
     if (uniqueRatio > 0.7) return "id";
@@ -43,53 +44,61 @@ function detectColumnType(name: string, values: string[]): ColumnType {
     return "date";
   }
 
-  // Value-based detection on sample
   const sample = nonEmpty.slice(0, 80);
-  
+
   if (sample.every(v => URL_REGEX.test(v))) return "url";
-  
+
   const dateMatches = sample.filter(v => DATE_REGEX.test(v.trim())).length;
   if (dateMatches > sample.length * 0.6) return "date";
-  
+
   const numMatches = sample.filter(v => NUMBER_REGEX.test(v.trim()) || CURRENCY_REGEX.test(v.trim())).length;
   if (numMatches > sample.length * 0.6) return "numeric";
 
-  // Check if text column
-  if (TEXT_KEYWORDS.some(k => lowerName.includes(k))) {
+  const uniqueVals = Array.from(new Set(nonEmpty));
+  const uniqueCount = uniqueVals.length;
+
+  if (TEXT_KEYWORDS.some(k => lowerName.includes(k) || lowerName === k)) {
+    // If a known text field has more than 15 unique entries, it is free-form.
+    // E.g., if "Actual Result" has 41 unique entries, kill it here.
+    if (uniqueCount > 15) return "text";
+    
+    // Otherwise check lengths
     const avgLen = nonEmpty.reduce((s, v) => s + v.length, 0) / nonEmpty.length;
-    if (avgLen > 30) return "text";
+    if (avgLen > 25) return "text";
   }
 
-  // Categorical detection
-  const uniqueCount = new Set(nonEmpty).size;
-  const avgLen = nonEmpty.reduce((s, v) => s + v.length, 0) / nonEmpty.length;
-  
-  // Strong categorical: very few unique values
+  const rawAvgLen = nonEmpty.reduce((s, v) => s + v.length, 0) / nonEmpty.length;
+  // Unweighted average length prevents a single common short value (e.g. "Pass" repeated 500 times)
+  // from hiding the fact that the other 40 values are 80-character sentences.
+  const uniqueAvgLen = uniqueVals.reduce((s, v) => s + v.length, 0) / uniqueCount;
+
   if (uniqueCount <= 2 && nonEmpty.length >= 5) return "categorical";
-  if (uniqueCount <= 15 && avgLen < 60) return "categorical";
-  if (uniqueCount <= 30 && uniqueCount < nonEmpty.length * 0.15 && avgLen < 50) return "categorical";
-  if (uniqueCount <= 50 && uniqueCount < nonEmpty.length * 0.08 && avgLen < 40) return "categorical";
+  if (uniqueCount <= 15 && rawAvgLen < 60) return "categorical";
+  if (uniqueCount <= 30 && uniqueCount < nonEmpty.length * 0.15 && rawAvgLen < 50) return "categorical";
   
-  // Long text
-  if (avgLen > 50) return "text";
-  
-  // ID-like: high uniqueness
+  // High-cardinality charts mask bad categorization. If it averages > 30 chars uniquely, it's text.
+  if (uniqueAvgLen > 30) return "text";
+
+  if (uniqueCount <= 50 && uniqueCount < nonEmpty.length * 0.08 && rawAvgLen < 40) return "categorical";
+
+  if (rawAvgLen > 50) return "text";
+
   if (uniqueCount > nonEmpty.length * 0.8) return "id";
-  
+
   return uniqueCount < nonEmpty.length * 0.4 ? "categorical" : "text";
 }
 
 export function analyzeColumns(rows: RawRow[]): DataAnalysis {
   if (rows.length === 0) return { columns: [], chartSuggestions: [], kpiColumns: [], totalRows: 0 };
 
-  const headers = Object.keys(rows[0]);
+  const headers = Object.keys(rows[0]).filter(h => !INTERNAL_COLUMNS.includes(h));
   const columns: ColumnAnalysis[] = [];
 
   for (const header of headers) {
     const values = rows.map(r => r[header] || "");
     const nonEmpty = values.filter(v => v.trim());
     const type = detectColumnType(header, nonEmpty);
-    
+
     const counts: Record<string, number> = {};
     const originalValues: Record<string, string> = {};
     for (const v of nonEmpty) {
@@ -126,7 +135,6 @@ function generateChartSuggestions(columns: ColumnAnalysis[]): ChartSuggestion[] 
   const suggestions: ChartSuggestion[] = [];
   const categoricals = columns.filter(c => c.type === "categorical" && c.fillRate > 20 && c.uniqueCount >= 2);
 
-  // Sort: priority keywords first, then fewer unique values
   const sorted = [...categoricals].sort((a, b) => {
     const aPri = PRIORITY_KEYWORDS.some(k => a.name.toLowerCase().includes(k)) ? 1 : 0;
     const bPri = PRIORITY_KEYWORDS.some(k => b.name.toLowerCase().includes(k)) ? 1 : 0;
@@ -137,25 +145,18 @@ function generateChartSuggestions(columns: ColumnAnalysis[]): ChartSuggestion[] 
   let priority = 100;
 
   for (const col of sorted.slice(0, 6)) {
-    if (col.uniqueCount === 2) {
-      // Binary — pie is perfect
-      suggestions.push({ type: "pie", columns: [col.name], title: `${col.name} Distribution`, priority: priority-- });
-    } else if (col.uniqueCount <= 7) {
-      // Small set — donut/pie
+    if (col.uniqueCount <= 7) {
       suggestions.push({ type: "pie", columns: [col.name], title: `${col.name} Distribution`, priority: priority-- });
     } else if (col.uniqueCount <= 12) {
-      // Medium — vertical bar
       suggestions.push({ type: "vbar", columns: [col.name], title: `${col.name} Breakdown`, priority: priority-- });
     } else {
-      // Larger — horizontal bar (better for long labels)
       suggestions.push({ type: "hbar", columns: [col.name], title: `Top ${col.name}`, priority: priority-- });
     }
   }
 
-  // Cross-analysis charts: pick the best 2-3 categorical pairs
   if (sorted.length >= 2) {
     const small = sorted.filter(c => c.uniqueCount <= 10);
-    
+
     if (small.length >= 2) {
       suggestions.push({
         type: "heatmap",
@@ -164,7 +165,7 @@ function generateChartSuggestions(columns: ColumnAnalysis[]): ChartSuggestion[] 
         priority: priority--,
       });
     }
-    
+
     if (sorted.length >= 2) {
       const [col1, col2] = sorted.slice(0, 2);
       if (col1.uniqueCount <= 12 && col2.uniqueCount <= 8) {
@@ -177,7 +178,6 @@ function generateChartSuggestions(columns: ColumnAnalysis[]): ChartSuggestion[] 
       }
     }
 
-    // Third cross-chart if enough data
     if (small.length >= 3) {
       suggestions.push({
         type: "stacked_bar",
@@ -203,17 +203,12 @@ function pickKPIColumns(columns: ColumnAnalysis[]): string[] {
     .map(c => c.name);
 }
 
-/**
- * Levenshtein distance check — returns true if strings differ by at most 2 chars
- * and are at least 4 chars long (to avoid merging short distinct values)
- */
 function areSimilar(a: string, b: string): boolean {
   if (a === b) return true;
   if (a.length < 4 || b.length < 4) return false;
   if (Math.abs(a.length - b.length) > 2) return false;
 
   const maxLen = Math.max(a.length, b.length);
-  let dist = 0;
   const matrix: number[][] = [];
   for (let i = 0; i <= a.length; i++) {
     matrix[i] = [i];
@@ -227,18 +222,15 @@ function areSimilar(a: string, b: string): boolean {
       );
     }
   }
-  dist = matrix[a.length][b.length];
-  // Allow merge if edit distance <= 2 and the words are reasonably long
+  const dist = matrix[a.length][b.length];
   return dist <= 2 && dist / maxLen < 0.4;
 }
 
 export function dynamicAggregate(rows: RawRow[], analysis: DataAnalysis) {
   const columnCounts: Record<string, Record<string, number>> = {};
-  
+
   for (const col of analysis.columns) {
     if (col.type === "categorical") {
-      // Case-insensitive + spelling-tolerant normalization
-      // Group by lowercase, pick the most frequent casing as canonical display name
       const lowerToCanonical: Record<string, string> = {};
       const lowerCounts: Record<string, number> = {};
       const casingCounts: Record<string, Record<string, number>> = {};
@@ -252,7 +244,6 @@ export function dynamicAggregate(rows: RawRow[], analysis: DataAnalysis) {
         casingCounts[lower][raw] = (casingCounts[lower][raw] || 0) + 1;
       }
 
-      // Pick the most common casing as canonical display name
       const counts: Record<string, number> = {};
       for (const [lower, total] of Object.entries(lowerCounts)) {
         const casings = casingCounts[lower];
@@ -260,7 +251,6 @@ export function dynamicAggregate(rows: RawRow[], analysis: DataAnalysis) {
         counts[canonical] = total;
       }
 
-      // Fuzzy merge: merge values that differ by 1-2 chars (typo tolerance)
       const keys = Object.keys(counts);
       const merged = new Set<string>();
       for (let i = 0; i < keys.length; i++) {
@@ -268,7 +258,6 @@ export function dynamicAggregate(rows: RawRow[], analysis: DataAnalysis) {
         for (let j = i + 1; j < keys.length; j++) {
           if (merged.has(keys[j])) continue;
           if (areSimilar(keys[i].toLowerCase(), keys[j].toLowerCase())) {
-            // Merge j into i (keep the one with higher count)
             if (counts[keys[i]] >= counts[keys[j]]) {
               counts[keys[i]] += counts[keys[j]];
               delete counts[keys[j]];

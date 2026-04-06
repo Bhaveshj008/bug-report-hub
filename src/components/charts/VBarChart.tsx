@@ -1,10 +1,10 @@
 import ReactEChartsCore from "echarts-for-react/lib/core";
 import * as echarts from "echarts/core";
 import { BarChart } from "echarts/charts";
-import { TooltipComponent, GridComponent } from "echarts/components";
+import { TooltipComponent, GridComponent, DataZoomComponent } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 
-echarts.use([BarChart, TooltipComponent, GridComponent, CanvasRenderer]);
+echarts.use([BarChart, TooltipComponent, GridComponent, DataZoomComponent, CanvasRenderer]);
 
 interface VBarChartProps {
   data: Record<string, number>;
@@ -20,8 +20,8 @@ const BAR_COLORS = [
 export function VBarChart({ data, title }: VBarChartProps) {
   const total = Object.values(data).reduce((s, v) => s + v, 0);
   const chartData = Object.entries(data)
-    .sort(([, a], [, b]) => b - a)
-    .slice(0, 12);
+    .sort(([, a], [, b]) => b - a);
+    // Removed .slice(0, 12) to show all modules
 
   const option: echarts.EChartsCoreOption = {
     tooltip: {
@@ -31,10 +31,17 @@ export function VBarChart({ data, title }: VBarChartProps) {
       borderColor: "rgba(255,255,255,0.1)",
       textStyle: { color: "#e2e8f0", fontSize: 12 },
     },
-    grid: { left: 40, right: 16, top: 12, bottom: 60, containLabel: false },
+    // Added dataZoom for scrolling through all modules
+    dataZoom: [
+      { type: "inside", xAxisIndex: 0 },
+      { type: "slider", show: true, xAxisIndex: 0, bottom: 0, height: 16, 
+        borderColor: "transparent", fillerColor: "rgba(255,255,255,0.1)", 
+        handleStyle: { color: "#94a3b8" }, showDetail: false }
+    ],
+    grid: { left: 40, right: 16, top: 12, bottom: 64, containLabel: false },
     xAxis: {
       type: "category",
-      data: chartData.map(([name]) => name.length > 14 ? name.slice(0, 12) + "…" : name),
+      data: chartData.map(([name]) => name.length > 20 ? name.slice(0, 18) + "…" : name),
       axisLabel: { fontSize: 10, color: "#94a3b8", rotate: 35 },
       axisLine: { lineStyle: { color: "#334155" } },
       axisTick: { show: false },

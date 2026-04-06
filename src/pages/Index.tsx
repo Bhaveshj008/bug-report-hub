@@ -1,5 +1,5 @@
-import { useState, useCallback, useEffect, useMemo } from "react";
-import { Bug, Trash2, Upload as UploadIcon, Settings, History } from "lucide-react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { Bug, Trash2, Upload as UploadIcon, Settings, History, AlertTriangle } from "lucide-react";
 import { FileUpload } from "@/components/FileUpload";
 import { GoogleSheetsConnect } from "@/components/GoogleSheetsConnect";
 import { SheetSelector } from "@/components/SheetSelector";
@@ -12,20 +12,27 @@ import { AIInsightsPanel } from "@/components/AIInsightsPanel";
 import { ExportBar } from "@/components/ExportBar";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { InsightsSidebar } from "@/components/InsightsSidebar";
+import { ModuleHealthMap } from "@/components/ModuleHealthMap";
+import { DateRangeFilter } from "@/components/DateRangeFilter";
 import { parseWorkbook, type SheetInfo } from "@/utils/excelParser";
 import { analyzeColumns, dynamicAggregate } from "@/utils/columnAnalyzer";
 import { getActiveApiKey, getActiveModel } from "@/utils/aiProviders";
+import { generateAISchema, generateFallbackSchema, detectDataTypeHeuristic } from "@/utils/aiSchema";
 import {
   saveBugData, loadBugData,
   savePreferences, loadPreferences, clearAllData,
-  saveAnalysisRecord, type AnalysisRecord,
+  saveAnalysisRecord, updateAnalysisRecord, type AnalysisRecord,
 } from "@/utils/store";
-import type { RawRow, UserPreferences, GoogleSheetsConfig } from "@/types/bug";
+import {
+  detectModuleColumn, detectRiskColumn, calculateModuleRisks,
+} from "@/utils/moduleRisk";
+import type { RawRow, UserPreferences, GoogleSheetsConfig, AISchema } from "@/types/bug";
 
 const DEFAULT_PREFS: UserPreferences = { theme: "dark", aiEnabled: false };
 
 export default function Dashboard() {
   const [rows, setRows] = useState<RawRow[]>([]);
+  const [filteredRows, setFilteredRows] = useState<RawRow[]>([]);
   const [fileName, setFileName] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [selectedRow, setSelectedRow] = useState<RawRow | null>(null);
@@ -38,6 +45,13 @@ export default function Dashboard() {
   const [visibleKPIs, setVisibleKPIs] = useState<Set<number>>(new Set());
   const [showSidebar, setShowSidebar] = useState(false);
   const [latestInsights, setLatestInsights] = useState<string | null>(null);
+  const [truncationWarning, setTruncationWarning] = useState("");
+
+  const [aiSchema, setAiSchema] = useState<AISchema | null>(null);
+  const [schemaLoading, setSchemaLoading] = useState(false);
+
+  // Track current analysis record ID to update (not duplicate) on insights generation
+  const currentAnalysisId = useRef<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -74,10 +88,17 @@ export default function Dashboard() {
     await savePreferences(newPrefs);
   }, []);
 
-  const loadSheets = useCallback(async (sheets: SheetInfo[], fName: string, gConfig?: GoogleSheetsConfig) => {
+  const loadSheets = useCallback(async (
+    sheets: SheetInfo[],
+    fName: string,
+    gConfig?: GoogleSheetsConfig
+  ) => {
     const allRows: RawRow[] = [];
     const sheetNames: string[] = [];
+    let totalOriginalRows = 0;
+
     for (const sheet of sheets) {
+      totalOriginalRows += sheet.rowCount;
       if (sheets.length > 1) {
         for (const row of sheet.sampleRows) {
           allRows.push({ ...row, __sheet: sheet.name });
@@ -88,20 +109,38 @@ export default function Dashboard() {
       sheetNames.push(sheet.name);
     }
 
+    // Warn if data was truncated
+    if (totalOriginalRows > allRows.length) {
+      setTruncationWarning(
+        `File has ${totalOriginalRows.toLocaleString()} rows — showing first 10,000 only.`
+      );
+    } else {
+      setTruncationWarning("");
+    }
+
     setRows(allRows);
+    setFilteredRows(allRows);
+    setLatestInsights(null);
+    setAiSchema(null);
     const displayName = sheets.length > 1 ? `${fName} (${sheetNames.join(", ")})` : fName;
     setFileName(displayName);
+
     const cfg = gConfig || googleConfig;
     if (cfg) setGoogleConfig(cfg);
     await saveBugData(allRows, displayName, undefined, cfg || undefined);
 
-    // Save to analysis history
+    // Save one analysis record per load
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    currentAnalysisId.current = id;
+
     const record: AnalysisRecord = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      id,
       fileName: displayName,
       timestamp: Date.now(),
       rowCount: allRows.length,
-      columnCount: allRows.length > 0 ? Object.keys(allRows[0]).length : 0,
+      columnCount: allRows.length > 0
+        ? Object.keys(allRows[0]).filter(k => k !== "__sheet").length
+        : 0,
       hasInsights: false,
     };
     await saveAnalysisRecord(record);
@@ -123,7 +162,9 @@ export default function Dashboard() {
         return;
       }
       await loadSheet(sheets[0], fName);
-    } catch (e) { console.error("Parse error:", e); }
+    } catch (e) {
+      console.error("Parse error:", e);
+    }
     setIsLoading(false);
   }, [loadSheet]);
 
@@ -155,46 +196,124 @@ export default function Dashboard() {
         }
       }
       setPendingSheets(sheets);
-      setPendingFileName(`Google Sheet`);
+      setPendingFileName("Google Sheet");
       setGoogleConfig(config);
     }
   }, [handleGoogleSheet, googleConfig]);
 
   const handleClearCache = useCallback(async () => {
+    const confirmed = window.confirm(
+      "Clear all data? This will remove your current dataset and analysis. This cannot be undone."
+    );
+    if (!confirmed) return;
     await clearAllData();
     setRows([]);
+    setFilteredRows([]);
     setFileName("");
     setGoogleConfig(null);
     setLatestInsights(null);
+    setTruncationWarning("");
+    setAiSchema(null);
+    currentAnalysisId.current = null;
   }, []);
 
   const handleDisconnectGoogle = useCallback(async () => {
+    const confirmed = window.confirm("Disconnect Google Sheet and clear data?");
+    if (!confirmed) return;
     setGoogleConfig(null);
     await clearAllData();
     setRows([]);
+    setFilteredRows([]);
     setFileName("");
+    setLatestInsights(null);
+    setTruncationWarning("");
+    setAiSchema(null);
+    currentAnalysisId.current = null;
   }, []);
 
   const handleInsightsGenerated = useCallback(async (insights: string) => {
     setLatestInsights(insights);
-    // Update the latest history record with insights
-    const record: AnalysisRecord = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      fileName,
-      timestamp: Date.now(),
-      rowCount: rows.length,
-      columnCount: rows.length > 0 ? Object.keys(rows[0]).length : 0,
-      hasInsights: true,
-      insights,
-    };
-    await saveAnalysisRecord(record);
-  }, [fileName, rows]);
+    // Update existing record instead of creating a new duplicate
+    if (currentAnalysisId.current) {
+      await updateAnalysisRecord(currentAnalysisId.current, {
+        hasInsights: true,
+        insights,
+      });
+    }
+  }, []);
 
-  const analysis = useMemo(() => analyzeColumns(rows), [rows]);
-  const agg = useMemo(() => dynamicAggregate(rows, analysis), [rows, analysis]);
+  const handleLoadRecord = useCallback((record: AnalysisRecord) => {
+    if (record.insights) {
+      setLatestInsights(record.insights);
+    }
+  }, []);
+
+  const rawAnalysis = useMemo(() => analyzeColumns(rows), [rows]);
+
+  const activeRows = filteredRows.length > 0 ? filteredRows : rows;
+  const analysis = useMemo(() => analyzeColumns(activeRows), [activeRows]);
+  const agg = useMemo(() => dynamicAggregate(activeRows, analysis), [activeRows, analysis]);
+
+  const handleDateFilter = useCallback((filtered: RawRow[]) => {
+    setFilteredRows(filtered);
+  }, []);
+
+  const moduleRisks = useMemo(() => {
+    if (activeRows.length === 0 || !aiSchema) return [];
+    const moduleCol = detectModuleColumn(analysis, aiSchema);
+    const riskInfo = detectRiskColumn(analysis, aiSchema);
+    if (!moduleCol || !riskInfo) return [];
+    return calculateModuleRisks(activeRows, moduleCol, riskInfo.column, riskInfo.type);
+  }, [activeRows, analysis, aiSchema]);
+
+  useEffect(() => {
+    if (!rows.length || !rawAnalysis.columns.length) return;
+
+    const rawAgg = dynamicAggregate(rows, rawAnalysis);
+    const activeKey = getActiveApiKey(prefs);
+    if (!prefs.aiEnabled || !activeKey) {
+      const dt = detectDataTypeHeuristic(rawAnalysis);
+      setAiSchema(generateFallbackSchema(rawAnalysis, rawAgg, dt));
+      return;
+    }
+
+    let cancelled = false;
+    setSchemaLoading(true);
+
+    generateAISchema(
+      activeKey,
+      prefs.aiProvider || "groq",
+      getActiveModel(prefs),
+      rawAnalysis,
+      rows
+    ).then(schema => {
+      if (cancelled) return;
+      if (schema) {
+        setAiSchema(schema);
+      } else {
+        const dt = detectDataTypeHeuristic(rawAnalysis);
+        setAiSchema(generateFallbackSchema(rawAnalysis, rawAgg, dt));
+      }
+      setSchemaLoading(false);
+    }).catch(() => {
+      if (cancelled) return;
+      const dt = detectDataTypeHeuristic(rawAnalysis);
+      setAiSchema(generateFallbackSchema(rawAnalysis, rawAgg, dt));
+      setSchemaLoading(false);
+    });
+
+    return () => { cancelled = true; };
+  }, [rows, rawAnalysis, prefs.aiEnabled, prefs.aiProvider, prefs.aiModel, prefs.apiKeys]);
 
   const hasData = rows.length > 0;
   const activeKey = getActiveApiKey(prefs);
+  const isFiltered = filteredRows.length !== rows.length;
+
+  // Stable dataset key for chat history (based on file name + row count)
+  const datasetKey = useMemo(() => {
+    if (!fileName) return "";
+    return `${fileName}-${rows.length}`.replace(/[^a-zA-Z0-9\-_]/g, "_");
+  }, [fileName, rows.length]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -205,11 +324,24 @@ export default function Dashboard() {
               <Bug className="h-4 w-4 text-primary-foreground" />
             </div>
             <h1 className="text-lg font-bold text-foreground tracking-tight">BugLens</h1>
+            {schemaLoading && (
+              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary animate-pulse">
+                AI analyzing…
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2">
             {hasData && (
               <>
-                <ExportBar bugs={rows} fileName={fileName} analysis={analysis} agg={agg} visibleKPIs={visibleKPIs} aiInsights={latestInsights} />
+                <ExportBar
+                  bugs={rows}
+                  fileName={fileName}
+                  analysis={analysis}
+                  agg={agg}
+                  visibleKPIs={visibleKPIs}
+                  aiInsights={latestInsights}
+                  aiSchema={aiSchema}
+                />
                 <button
                   onClick={() => setShowSidebar(true)}
                   className="flex h-9 items-center gap-1.5 rounded-md border bg-card px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted"
@@ -221,25 +353,35 @@ export default function Dashboard() {
                 <label className="flex h-9 cursor-pointer items-center gap-1.5 rounded-md border bg-card px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted">
                   <UploadIcon className="h-3.5 w-3.5" />
                   New
-                  <input type="file" accept=".xlsx,.xls,.csv" className="hidden"
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    className="hidden"
                     onChange={(e) => {
                       const file = e.target.files?.[0];
                       if (file) {
                         const reader = new FileReader();
-                        reader.onload = (ev) => { if (ev.target?.result) handleFile(ev.target.result as ArrayBuffer, file.name); };
+                        reader.onload = (ev) => {
+                          if (ev.target?.result) handleFile(ev.target.result as ArrayBuffer, file.name);
+                        };
                         reader.readAsArrayBuffer(file);
                       }
+                      // Reset so same file can be re-uploaded
+                      e.target.value = "";
                     }}
                   />
                 </label>
-                <button onClick={handleClearCache}
+                <button
+                  onClick={handleClearCache}
                   className="flex h-9 items-center gap-1.5 rounded-md border bg-card px-3 text-xs font-medium text-destructive transition-colors hover:bg-destructive/10"
+                  title="Clear data"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
               </>
             )}
-            <button onClick={() => setShowSettings(true)}
+            <button
+              onClick={() => setShowSettings(true)}
               className="flex h-9 w-9 items-center justify-center rounded-md border bg-card text-foreground transition-colors hover:bg-muted"
               aria-label="Settings"
             >
@@ -251,6 +393,14 @@ export default function Dashboard() {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 space-y-6">
+        {/* Truncation warning banner */}
+        {truncationWarning && (
+          <div className="flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/5 px-4 py-2.5">
+            <AlertTriangle className="h-4 w-4 text-warning shrink-0" />
+            <p className="text-sm text-foreground">{truncationWarning}</p>
+          </div>
+        )}
+
         {!hasData ? (
           <div className="mx-auto max-w-xl pt-20">
             <div className="mb-8 text-center">
@@ -258,7 +408,9 @@ export default function Dashboard() {
                 <Bug className="h-8 w-8 text-primary" />
               </div>
               <h2 className="text-2xl font-bold text-foreground">Universal Data Analytics</h2>
-              <p className="mt-2 text-muted-foreground">Upload any Excel/CSV or connect Google Sheets — charts auto-adapt to your data.</p>
+              <p className="mt-2 text-muted-foreground">
+                Upload any Excel/CSV or connect Google Sheets — charts auto-adapt to your data.
+              </p>
               {prefs.aiEnabled && activeKey && (
                 <p className="mt-1 text-xs text-primary">✨ AI-powered insights active</p>
               )}
@@ -275,10 +427,9 @@ export default function Dashboard() {
                 onSheetLoaded={handleGoogleSheet}
                 onMultipleSheets={handleGoogleSheetsMulti}
                 activeConfig={null}
-                onDisconnect={() => {}}
+                onDisconnect={() => { }}
               />
             </div>
-            {/* Show history button even without data */}
             <div className="mt-6 text-center">
               <button
                 onClick={() => setShowSidebar(true)}
@@ -301,8 +452,35 @@ export default function Dashboard() {
               />
             )}
 
-            <DynamicKPICards analysis={analysis} agg={agg} fileName={fileName} onVisibleKPIsChange={setVisibleKPIs} />
-            <DynamicCharts rows={rows} analysis={analysis} agg={agg} />
+            <div className="flex items-center gap-3">
+              <DateRangeFilter
+                rows={rows}
+                analysis={rawAnalysis}
+                onFilteredRows={handleDateFilter}
+              />
+              {isFiltered && (
+                <span className="text-xs text-muted-foreground">
+                  Showing <b className="text-foreground">{activeRows.length.toLocaleString()}</b> of {rows.length.toLocaleString()} rows
+                </span>
+              )}
+            </div>
+
+            <DynamicKPICards
+              analysis={analysis}
+              agg={agg}
+              fileName={fileName}
+              aiSchema={aiSchema}
+              onVisibleKPIsChange={setVisibleKPIs}
+            />
+
+            <DynamicCharts rows={activeRows} analysis={analysis} agg={agg} aiSchema={aiSchema} />
+
+            <ModuleHealthMap
+              rows={activeRows}
+              analysis={analysis}
+              agg={agg}
+              aiSchema={aiSchema}
+            />
 
             {prefs.aiEnabled && activeKey && (
               <AIInsightsPanel
@@ -310,25 +488,67 @@ export default function Dashboard() {
                 provider={prefs.aiProvider || "groq"}
                 model={getActiveModel(prefs)}
                 agg={agg}
-                bugs={rows}
+                bugs={activeRows}
+                datasetKey={datasetKey}
+                moduleRisks={moduleRisks}
+                initialInsights={latestInsights}
                 onInsightsGenerated={handleInsightsGenerated}
+                analysis={analysis}
+                aiSchema={aiSchema}
               />
             )}
 
             <div>
-              <h3 className="mb-3 text-sm font-semibold text-foreground">Data ({rows.length} rows)</h3>
-              <DynamicTable rows={rows} analysis={analysis} onSelectRow={setSelectedRow} />
+              <h3 className="mb-3 text-sm font-semibold text-foreground">
+                Data
+                <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs font-normal text-muted-foreground">
+                  {activeRows.length.toLocaleString()} rows
+                </span>
+                {isFiltered && (
+                  <span className="ml-2 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-normal text-primary">
+                    filtered
+                  </span>
+                )}
+                {truncationWarning && (
+                  <span className="ml-2 rounded-full bg-warning/10 px-2 py-0.5 text-xs font-normal text-warning">
+                    truncated
+                  </span>
+                )}
+              </h3>
+              {/* key={fileName} forces DynamicTable to remount on new file, clearing filter/sort state */}
+              <DynamicTable
+                key={fileName}
+                rows={activeRows}
+                analysis={analysis}
+                onSelectRow={setSelectedRow}
+              />
             </div>
           </div>
         )}
       </main>
 
       <DynamicDetailDrawer row={selectedRow} onClose={() => setSelectedRow(null)} />
+
       {pendingSheets && (
-        <SheetSelector sheets={pendingSheets} onSelect={handleSheetsSelected} onCancel={() => setPendingSheets(null)} />
+        <SheetSelector
+          sheets={pendingSheets}
+          onSelect={handleSheetsSelected}
+          onCancel={() => setPendingSheets(null)}
+        />
       )}
-      <SettingsModal open={showSettings} onClose={() => setShowSettings(false)} preferences={prefs} onSave={handleSavePrefs} />
-      <InsightsSidebar open={showSidebar} onClose={() => setShowSidebar(false)} />
+
+      <SettingsModal
+        open={showSettings}
+        onClose={() => setShowSettings(false)}
+        preferences={prefs}
+        onSave={handleSavePrefs}
+      />
+
+      <InsightsSidebar
+        open={showSidebar}
+        onClose={() => setShowSidebar(false)}
+        onLoadRecord={handleLoadRecord}
+      />
     </div>
   );
 }
