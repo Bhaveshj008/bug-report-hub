@@ -1,4 +1,4 @@
-# BugLens — Complete System Flow & Logic
+# QualityLens — Complete System Flow & Logic
 
 ## Table of Contents
 1. [Data Ingestion](#1-data-ingestion)

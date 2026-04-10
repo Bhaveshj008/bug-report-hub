@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
-import { Bug, Trash2, Upload as UploadIcon, Settings, History, AlertTriangle } from "lucide-react";
+import { Bug, Trash2, Upload as UploadIcon, Settings, History, AlertTriangle, Camera, Scan, ThumbsUp } from "lucide-react";
 import { FileUpload } from "@/components/FileUpload";
 import { GoogleSheetsConnect } from "@/components/GoogleSheetsConnect";
 import { SheetSelector } from "@/components/SheetSelector";
@@ -321,9 +321,9 @@ export default function Dashboard() {
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6">
           <div className="flex items-center gap-2.5">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-              <Bug className="h-4 w-4 text-primary-foreground" />
+              <ThumbsUp className="h-4 w-4 text-primary-foreground" />
             </div>
-            <h1 className="text-lg font-bold text-foreground tracking-tight">BugLens</h1>
+            <h1 className="text-lg font-bold text-foreground tracking-tight">QualityLens</h1>
             {schemaLoading && (
               <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary animate-pulse">
                 AI analyzing…
@@ -405,7 +405,7 @@ export default function Dashboard() {
           <div className="mx-auto max-w-xl pt-20">
             <div className="mb-8 text-center">
               <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 animate-pulse-glow">
-                <Bug className="h-8 w-8 text-primary" />
+                <ThumbsUp className="h-8 w-8 text-primary" />
               </div>
               <h2 className="text-2xl font-bold text-foreground">Universal Data Analytics</h2>
               <p className="mt-2 text-muted-foreground">

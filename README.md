@@ -1,8 +1,8 @@
-# BugLens - Bug Report Analytics Dashboard
+# QualityLens - Bug Report Analytics Dashboard
 
 ## What is it?
 
-BugLens is a universal data analytics dashboard that helps you analyze bug reports and data from multiple sources. Upload your Excel/CSV files or connect Google Sheets directly, and it automatically creates dynamic charts and visualizations to show you:
+QualityLens is a universal data analytics dashboard that helps you analyze bug reports and data from multiple sources. Upload your Excel/CSV files or connect Google Sheets directly, and it automatically creates dynamic charts and visualizations to show you:
 
 - How many bugs by severity (Critical, High, Medium, Low)
 - Which components have the most issues
@@ -15,7 +15,7 @@ Works with any structured data - automatically adapts charts and reports to your
 
 ## Why use it?
 
-Instead of looking at raw Excel or Google Sheets data, BugLens shows you the big picture with dynamic charts and visualizations. You can quickly:
+Instead of looking at raw Excel or Google Sheets data, QualityLens shows you the big picture with dynamic charts and visualizations. You can quickly:
 - Spot patterns and trends in your data automatically
 - See which areas need the most attention
 - View bugs by severity, component, platform, and more
@@ -28,7 +28,7 @@ Instead of looking at raw Excel or Google Sheets data, BugLens shows you the big
 
 ### Option 1: Upload Excel/CSV Files
 - Click "Upload" and select your Excel or CSV file
-- BugLens automatically detects which columns contain severity, component, platform, etc.
+- QualityLens automatically detects which columns contain severity, component, platform, etc.
 - If it can't figure it out, you can manually map the columns
 - Supports multiple sheets -select the sheet you want to analyze
 
@@ -36,7 +36,7 @@ Instead of looking at raw Excel or Google Sheets data, BugLens shows you the big
 - Click "Connect Google Sheet"
 - Paste your Google Sheets link (must be shared as "Anyone with link")
 - If your sheet has multiple sheets, select the one you want to analyze
-- BugLens automatically fetches and analyzes your data
+- QualityLens automatically fetches and analyzes your data
 - **Multi-sheet support**: Easily switch between sheets without re-entering the URL
 - **Real-time updates**: Enable "Auto-refresh" to automatically sync data at intervals (10s to 5 min)
 - Works with or without Google Sheets API key
@@ -54,7 +54,7 @@ Instead of looking at raw Excel or Google Sheets data, BugLens shows you the big
 
 ## Google Sheets Integration
 
-BugLens now supports live Google Sheets integration for real-time collaborative analytics:
+QualityLens now supports live Google Sheets integration for real-time collaborative analytics:
 
 ### Features:
 - **Direct Sheet Connection**: Paste any Google Sheets URL (must be shared as "Anyone with link")
@@ -82,7 +82,7 @@ This is a **frontend-only application**. Everything runs in your browser. Your d
 
 ## Optional: AI Mode
 
-BugLens has an optional AI feature that can help automatically map your Excel columns. This is useful if your column names are unusual.
+QualityLens has an optional AI feature that can help automatically map your Excel columns. This is useful if your column names are unusual.
 
 ### How to enable AI mode:
 
@@ -125,7 +125,7 @@ npm run build
 
 ## Supported Data Format
 
-BugLens works with any structured data and automatically creates appropriate visualizations:
+QualityLens works with any structured data and automatically creates appropriate visualizations:
 
 ### Common columns (auto-detected):
 - Severity (Critical, High, Medium, Low)
@@ -139,7 +139,7 @@ BugLens works with any structured data and automatically creates appropriate vis
 - Support for multiple report types - dashboard auto-adapts to your data
 - AI-powered column detection (optional) for unusual column names
 - Custom column mapping if needed
-- Don't worry about column names - BugLens figures it out!
+- Don't worry about column names - QualityLens figures it out!
 
 ### Data Types Supported:
 - Bug reports and issue tracking
@@ -154,7 +154,7 @@ BugLens works with any structured data and automatically creates appropriate vis
 
 - **Dark/Light theme**: Click the theme toggle in the top-right
 - **Column mapping**: If auto-detection isn't perfect, use the "Map Columns" modal to fix it
-- **Save templates**: BugLens remembers your column mappings for future uploads
+- **Save templates**: QualityLens remembers your column mappings for future uploads
 - **Multiple sheets**: Works with Excel files and Google Sheets - select the sheet you want to analyze
 - **Google Sheets sharing**: Make sure your Google Sheet is shared as "Anyone with the link" to connect
 - **Auto-refresh**: Enable auto-sync to keep your dashboard updated with live data from Google Sheets
@@ -170,7 +170,7 @@ For faster and more reliable Google Sheets access, you can optionally provide a 
 2. Create a new project
 3. Enable the Google Sheets API
 4. Create an API key (credentials)
-5. In BugLens Settings, paste your API key in "Google Sheets API Key"
+5. In QualityLens Settings, paste your API key in "Google Sheets API Key"
 
 Without an API key, BubLens still works but uses slower public export methods.
 
